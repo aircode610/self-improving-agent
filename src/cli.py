@@ -1,0 +1,111 @@
+"""CLI entry point for the self-improving PR reviewer."""
+
+import argparse
+import asyncio
+import os
+import sys
+from pathlib import Path
+
+
+def _load_dotenv() -> None:
+    """Load .env from the project root (no external dependency needed)."""
+    env_path = Path(__file__).parent.parent / ".env"
+    if not env_path.exists():
+        return
+    for line in env_path.read_text().splitlines():
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, _, value = line.partition("=")
+        key = key.strip()
+        value = value.strip().strip('"').strip("'")
+        if key and key not in os.environ:
+            os.environ[key] = value
+
+
+_load_dotenv()
+
+
+def get_github_mcp_config() -> dict:
+    token = os.environ.get("GITHUB_PERSONAL_ACCESS_TOKEN", "")
+    return {
+        "command": "npx",
+        "args": ["-y", "@modelcontextprotocol/server-github"],
+        "env": {"GITHUB_PERSONAL_ACCESS_TOKEN": token},
+    }
+
+
+def cmd_init(args):
+    """Bootstrap: scan repo via GitHub MCP, write initial skills."""
+    from src.bootstrapper import run_bootstrapper
+
+    owner_repo = args.repo
+    if "/" not in owner_repo:
+        print(f"Error: repo must be in 'owner/repo' format, got: {owner_repo}")
+        sys.exit(1)
+    owner, repo = owner_repo.split("/", 1)
+    asyncio.run(run_bootstrapper(owner, repo, get_github_mcp_config()))
+
+
+def cmd_review(args):
+    """Review a PR and auto-grade it."""
+    from src.reviewer import run_reviewer
+    from src.grader import run_grader
+
+    owner_repo = args.repo
+    if "/" not in owner_repo:
+        print(f"Error: repo must be in 'owner/repo' format, got: {owner_repo}")
+        sys.exit(1)
+    owner, repo = owner_repo.split("/", 1)
+    pr_number = args.pr_number
+
+    mcp_config = get_github_mcp_config()
+
+    # Run reviewer
+    review_id, review_output = asyncio.run(
+        run_reviewer(owner, repo, pr_number, mcp_config)
+    )
+
+    # Auto-run grader
+    print(f"\nAuto-grading review {review_id}...")
+    asyncio.run(run_grader(owner, repo, pr_number, review_id, review_output, mcp_config))
+    print(f"Grading complete. See history/reviews/{review_id}/grading.json")
+
+
+def cmd_improve(args):
+    """Run skill improvement loop based on grader feedback."""
+    from src.improver import run_improver
+
+    asyncio.run(run_improver())
+
+
+def main():
+    parser = argparse.ArgumentParser(
+        description="Self-improving PR reviewer powered by Claude Agent SDK"
+    )
+    subparsers = parser.add_subparsers(dest="command", required=True)
+
+    # init command
+    init_parser = subparsers.add_parser("init", help="Bootstrap skills for a repo")
+    init_parser.add_argument("repo", help="GitHub repo in owner/repo format")
+
+    # review command
+    review_parser = subparsers.add_parser("review", help="Review a PR")
+    review_parser.add_argument("repo", help="GitHub repo in owner/repo format")
+    review_parser.add_argument("pr_number", type=int, help="PR number to review")
+
+    # improve command
+    subparsers.add_parser("improve", help="Improve skills based on grader feedback")
+
+    args = parser.parse_args()
+
+    if args.command == "init":
+        cmd_init(args)
+    elif args.command == "review":
+        cmd_review(args)
+    elif args.command == "improve":
+        cmd_improve(args)
+
+
+if __name__ == "__main__":
+    main()

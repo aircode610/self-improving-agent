@@ -1,0 +1,19 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+.venv/
+venv/
+*.env
+.env
+
+# Review history (keep structure, ignore content)
+history/reviews/*/
+
+# Workspace temp files
+workspace/skill-snapshot/
+workspace/iteration-*/
+
+# Keep skill files
+!skills/pr-review/.gitkeep
