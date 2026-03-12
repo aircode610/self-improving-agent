@@ -72,7 +72,7 @@ The working directory is {project_root} — write files relative to it.
             allowed_tools=["Read", "Write", "Glob", "Grep"],
             mcp_servers={"github": github_mcp_config},
             max_turns=30,
-            permission_mode="acceptEdits",
+            permission_mode="bypassPermissions",
             system_prompt=(
                 "You are a codebase analyst. Your job is to deeply understand a GitHub repository "
                 "and write precise, repo-specific PR review skills. Be concrete and specific — "

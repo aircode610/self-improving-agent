@@ -148,7 +148,7 @@ Write the updated skill files directly — they will be used on the next review.
             cwd=project_root,
             allowed_tools=["Read", "Write", "Edit", "Glob", "Grep"],
             max_turns=20,
-            permission_mode="acceptEdits",
+            permission_mode="bypassPermissions",
             system_prompt=(
                 "You are a skill improvement expert. You analyze grading feedback and rewrite "
                 "review skills to be more precise and effective. Your changes must be grounded "

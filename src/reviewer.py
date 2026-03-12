@@ -1,4 +1,4 @@
-"""Reviewer agent: reads a PR via GitHub MCP, reviews using skills, posts review to GitHub."""
+"""Reviewer agent: reads a PR via GitHub MCP, reviews using skills, saves results locally."""
 
 import json
 import os
@@ -50,7 +50,7 @@ Perform a thorough review following the loaded skills. For each issue found, cla
 - warning: code quality, performance, missing tests, violations of repo conventions
 - nit: style, naming, minor improvements
 
-After reviewing, format your findings as a JSON array written to history/reviews/{review_id}/review.json:
+After reviewing, save your findings to history/reviews/{review_id}/review.json using this schema:
 ```json
 {{
   "pr": "{owner}/{repo}#{pr_number}",
@@ -67,10 +67,7 @@ After reviewing, format your findings as a JSON array written to history/reviews
 }}
 ```
 
-Then post the review to GitHub using MCP:
-1. create_pending_pull_request_review for {owner}/{repo} PR #{pr_number}
-2. For each critical/warning issue: add_pull_request_review_comment_to_pending_review
-3. submit_pending_pull_request_review with event matching your verdict
+Do NOT post to GitHub. Save only to the local file above.
 
 The working directory is {project_root}.
 """
@@ -85,11 +82,11 @@ The working directory is {project_root}.
             allowed_tools=["Read", "Write", "Glob", "Grep"],
             mcp_servers={"github": github_mcp_config},
             max_turns=25,
-            permission_mode="acceptEdits",
+            permission_mode="bypassPermissions",
             system_prompt=(
                 "You are an expert code reviewer. You follow repo-specific guidelines precisely. "
                 "You are thorough but not pedantic — focus on meaningful issues. "
-                "You always post your review back to GitHub after completing it."
+                "Save your review as a JSON file locally — do not post to GitHub."
             ),
         ),
     ):

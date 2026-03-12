@@ -116,7 +116,7 @@ The working directory is {project_root}.
             allowed_tools=["Read", "Write", "Glob", "Grep"],
             mcp_servers={"github": github_mcp_config},
             max_turns=20,
-            permission_mode="acceptEdits",
+            permission_mode="bypassPermissions",
             system_prompt=(
                 "You are an objective grader evaluating the quality of a code review. "
                 "You have access to the same GitHub PR as the reviewer, and you independently "
