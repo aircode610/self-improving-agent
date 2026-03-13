@@ -1,0 +1,73 @@
+{
+  "pr": "matplotlib/matplotlib#31218",
+  "summary": "Adds a new `ps.fonttype = 0` (or `'path'`) rcParam value that converts all text to PostScript path outlines in PS/EPS output, mirroring `svg.fonttype = 'path'`. The implementation introduces a new `_draw_text_as_path` method in `RendererPS` and a dedicated `validate_ps_fonttype` validator. Three rcParam files are properly updated (rcsetup.py, matplotlibrc, rcsetup.pyi). However, the PR is missing required documentation files (what's-new and API-change RST notes), the test pollutes global rcParams state, the PostScript rendering logic has a missing `newpath` that could corrupt the current path, and the single trailing `fill` for all accumulated glyph paths may interact poorly with nonzero winding rule for complex glyphs. Overall the approach is sound but several correctness and process issues need addressing before merge.",
+  "issues": [
+    {
+      "file": "lib/matplotlib/tests/test_backend_ps.py",
+      "line": 292,
+      "severity": "critical",
+      "comment": "`mpl.rcParams[\"ps.fonttype\"] = 0` is set globally without cleanup. This contaminates all tests that run after `test_fonttype_path` in the same session. Must use `with mpl.rc_context({'ps.fonttype': 0}):` (or `@pytest.mark.parametrize` / `@mpl.style.context`) so the change is scoped to this test."
+    },
+    {
+      "file": "lib/matplotlib/backends/backend_ps.py",
+      "line": 0,
+      "severity": "critical",
+      "comment": "No `doc/release/next_whats_new/*.rst` file was added despite the PR checklist claiming 'New Features and API Changes are noted'. Adding a new valid value for `ps.fonttype` is a new feature that requires a `.. versionadded:: 3.N` note and a what's-new RST under `doc/release/next_whats_new/ps_text_as_path.rst`."
+    },
+    {
+      "file": "lib/matplotlib/rcsetup.py",
+      "line": 0,
+      "severity": "critical",
+      "comment": "No `doc/api/next_api_changes/behavior_changes/*.rst` entry was added. Extending `ps.fonttype` to accept `0`/`'path'` is a behavior change to an existing rcParam validator that must be documented under `doc/api/next_api_changes/behavior_changes/`."
+    },
+    {
+      "file": "lib/matplotlib/backends/backend_ps.py",
+      "line": 952,
+      "severity": "warning",
+      "comment": "`_draw_text_as_path` does not emit `newpath` before accumulating path commands. In PostScript `gsave` does NOT clear the current path, so any pre-existing path in the graphics state will be silently merged into the accumulated glyph paths and filled by the final `fill` command. Add `self._pswriter.write(\"newpath\\n\")` immediately after the `gsave`."
+    },
+    {
+      "file": "lib/matplotlib/backends/backend_ps.py",
+      "line": 952,
+      "severity": "warning",
+      "comment": "A single `fill` at the end of `_draw_text_as_path` fills all glyph sub-paths as one compound path using PostScript's default nonzero winding rule. For glyphs with counter shapes (e.g. 'O', 'P', 'B') the hole must be wound in the opposite direction to the outer contour to render correctly. This relies entirely on FreeType/text2path returning correctly oriented contours. The safer approach is to emit `fill` (or `eofill`) after each individual glyph sub-path, matching how other backends handle glyph-by-glyph rendering."
+    },
+    {
+      "file": "lib/matplotlib/backends/backend_ps.py",
+      "line": 952,
+      "severity": "warning",
+      "comment": "`_draw_text_as_path` is missing the `@_log_if_debug_on` decorator that every other draw method in `RendererPS` carries (`draw_text`, `draw_mathtext`, `draw_markers`, `_draw_ps`, etc.). Add `@_log_if_debug_on` for consistency and to benefit from the backend's standard debug tracing."
+    },
+    {
+      "file": "lib/matplotlib/backends/backend_ps.py",
+      "line": 1127,
+      "severity": "warning",
+      "comment": "The interaction between `ps.fonttype == 0` and `ps.usedistiller` is unhandled. When a distiller (ghostscript/xpdf) post-processes the PS output it may re-embed or re-subset fonts, potentially re-introducing font references and defeating the purpose of path conversion. The code should either warn when both options are active or document the interaction clearly."
+    },
+    {
+      "file": "lib/matplotlib/backends/backend_ps.py",
+      "line": 827,
+      "severity": "nit",
+      "comment": "The early-return `if mpl.rcParams['ps.fonttype'] == 0` guard inside `draw_mathtext` is dead code in the normal rendering flow: `draw_text` already intercepts mathtext (`ismath=True`) and calls `_draw_text_as_path` before ever reaching `draw_mathtext`. The only way this guard fires is if `draw_mathtext` is called directly, which is not a public usage pattern. Remove it to avoid confusion, or add a comment explaining why the defensive guard is intentional."
+    },
+    {
+      "file": "lib/matplotlib/backends/backend_ps.py",
+      "line": 952,
+      "severity": "nit",
+      "comment": "`_draw_text_as_path` has no docstring — only a bare inline comment `# Draw text as path outlines, bypassing font embedding.` Promote this to a proper docstring. Also note the known limitation that converted text is not searchable/selectable in PDF viewers (important user-facing caveat)."
+    },
+    {
+      "file": "lib/matplotlib/backends/backend_ps.py",
+      "line": 975,
+      "severity": "nit",
+      "comment": "`Path(verts * 64, codes)` followed immediately by `Affine2D().scale(scale / 64.0)` multiplies the vertices by 64 and then divides by 64 — these cancel out for any value of `scale`. The code should simply be `Path(verts, codes)` with `Affine2D().scale(scale)`. The `* 64` pattern appears to be a mistaken attempt to match a FreeType 26.6 fixed-point convention that has already been handled upstream in `text2path`."
+    },
+    {
+      "file": "lib/matplotlib/rcsetup.py",
+      "line": 284,
+      "severity": "nit",
+      "comment": "`validate_fonttype` error messages were changed from `'Supported Postscript/PDF font types are %s'` to just `'Supported font types are %s'`. Now that the function is exclusively used for `pdf.fonttype`, the message should say `'Supported PDF font types are %s'` to give users a clear context when they hit a validation error."
+    }
+  ],
+  "verdict": "REQUEST_CHANGES"
+}

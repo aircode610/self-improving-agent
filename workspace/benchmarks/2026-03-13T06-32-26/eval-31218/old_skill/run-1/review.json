@@ -1,0 +1,61 @@
+{
+  "pr": "matplotlib/matplotlib#31218",
+  "summary": "This PR adds `ps.fonttype = 0` ('path') support to the PS/EPS backend, mirroring `svg.fonttype = 'path'`. The feature goal is valid and the high-level structure is sensible (new `validate_ps_fonttype`, rcParam validator wired up, `_draw_text_as_path` helper, intercept points in `draw_tex`/`draw_text`/`draw_mathtext`). However, there are two critical missing documentation artifacts the PR claims to have but are absent from the diff, a PostScript-level correctness bug (missing `newpath`), a potentially incorrect coordinate scaling for mathtext, dead code, and several smaller issues. Recommend REQUEST_CHANGES.",
+  "issues": [
+    {
+      "file": "lib/matplotlib/backends/backend_ps.py",
+      "line": 952,
+      "severity": "critical",
+      "comment": "Missing `doc/release/next_whats_new/*.rst` file. The PR description checks [X] for 'New Features and API Changes are noted with a directive and release note', but no `doc/release/next_whats_new/` RST file appears anywhere in the diff. A new user-visible feature (`ps.fonttype = 0` / `'path'`) requires a what's-new note under `doc/release/next_whats_new/<descriptive_name>.rst` with a `.. versionadded:: 3.N` directive. Without it the docs CI will flag this and users will not discover the feature through the changelog."
+    },
+    {
+      "file": "lib/matplotlib/rcsetup.py",
+      "line": 282,
+      "severity": "critical",
+      "comment": "Missing `doc/api/next_api_changes/behavior_changes/*.rst` file. Two behavior changes lack API-change notes: (1) `validate_fonttype` has been silently narrowed from 'Postscript or PDF' to 'PDF only' — any code that relied on `ps.fonttype` being validated by this function may see different error messages; (2) `ps.fonttype` now accepts integer `0` and string `'path'`, which is a backward-compatible extension but still requires an API-change note in `doc/api/next_api_changes/behavior_changes/`. See `doc/devel/api_changes.rst` for requirements."
+    },
+    {
+      "file": "lib/matplotlib/backends/backend_ps.py",
+      "line": 972,
+      "severity": "warning",
+      "comment": "Missing `newpath` after `gsave`. In PostScript, `gsave` saves the entire current graphics state including the current path. Without an explicit `newpath` after `gsave`, any pre-existing current path (accumulated from a previous draw call that did not consume its path, however unlikely) would be mixed with the glyph paths and filled by the final `fill` command. The established pattern in this very file confirms the fix — the marker-drawing code at line ~634 uses `['gsave', 'newpath', 'translate']` precisely for this reason. Fix: add `self._pswriter.write('newpath\\n')` immediately after the `gsave` write:\n```python\nself._pswriter.write('gsave\\n')\nself._pswriter.write('newpath\\n')  # clear any pre-existing current path\nself._pswriter.write(self._get_clip_cmd(gc))\n```"
+    },
+    {
+      "file": "lib/matplotlib/backends/backend_ps.py",
+      "line": 983,
+      "severity": "warning",
+      "comment": "`Path(verts * 64, codes)` with `glyph_transform.scale(scale / 64.0)` is inconsistent with `textpath.py`'s convention and likely produces incorrect rendering for mathtext. In `textpath.py::get_text_path`, glyph verts are used directly as `verts * scale` (no 64 factor), confirming that the verts from `glyph_map` are already in FONT_SCALE-normalised units. The `* 64` / `/ 64.0` cancel out for regular text (scale=1.0), but for mathtext where `scale = fontsize / FONT_SCALE`, the outer PS `font_scale font_scale scale` transform combined with `glyph_transform.scale(scale / 64.0)` on the 64×-inflated path results in glyph outlines scaled by `(fontsize/FONT_SCALE)^2` while glyph positions are only scaled by `fontsize/FONT_SCALE`, misaligning glyphs and their bounding boxes. The simpler and correct approach mirrors the SVG backend:\n```python\npath = Path(verts, codes)\nglyph_transform = Affine2D().scale(scale).translate(xposition, yposition)\n```\nPlease add a test that renders mathtext (`$x^2$`) with `ps.fonttype = 0` and verify visually against the standard mathtext output."
+    },
+    {
+      "file": "lib/matplotlib/backends/backend_ps.py",
+      "line": 952,
+      "severity": "warning",
+      "comment": "`_draw_text_as_path` is missing the `@_log_if_debug_on` decorator that every other drawing method in `RendererPS` carries (`draw_path`, `draw_tex`, `draw_text`, `draw_mathtext`, `draw_image`, `draw_markers`). Without it, debug-mode PS output tracing (`debugPS = True`) will silently skip logging for this new method, making debugging of path-mode text harder. Add `@_log_if_debug_on` above the `def _draw_text_as_path(...)` line."
+    },
+    {
+      "file": "lib/matplotlib/backends/backend_ps.py",
+      "line": 828,
+      "severity": "warning",
+      "comment": "Dead code: the `ps.fonttype == 0` guard inside `draw_mathtext` (lines 828–831) is unreachable in normal usage. `draw_mathtext` is only ever called from `draw_text`, and `draw_text` already short-circuits at line 775 with `return self._draw_text_as_path(...)` before it can call `draw_mathtext`. The check in `draw_mathtext` will therefore never fire. It should either be removed to reduce confusion, or there should be a comment explaining why it's intentional defense-in-depth. If removed, also consider adding a brief comment in `draw_text` noting that `draw_mathtext` is deliberately bypassed when `ps.fonttype == 0`."
+    },
+    {
+      "file": "lib/matplotlib/rcsetup.py",
+      "line": 293,
+      "severity": "nit",
+      "comment": "After the refactor, `validate_fonttype` is PDF-only, but its `ValueError` messages were changed to the overly generic `'Supported font types are %s'`. Since the function is now PDF-specific, the message should say `'Supported PDF font types are %s'` to match the updated docstring (`\"Confirm that this is a PDF font type\"`) and to give users a clear diagnostic when they incorrectly pass a PS-only value like `0` to a PDF parameter."
+    },
+    {
+      "file": "lib/matplotlib/backends/backend_ps.py",
+      "line": 952,
+      "severity": "nit",
+      "comment": "`_draw_text_as_path` uses a bare comment (`# Draw text as path outlines, bypassing font embedding.`) instead of a docstring. All other `RendererPS` helper methods use triple-quoted docstrings. Even for private methods, a docstring is preferable because it shows up in `help()` and IDEs. Replace the comment with `\"\"\"Draw text as path outlines, bypassing font embedding.\"\"\"` as the first statement of the function body."
+    },
+    {
+      "file": "lib/matplotlib/tests/test_backend_ps.py",
+      "line": 290,
+      "severity": "nit",
+      "comment": "`test_fonttype_path` sets `mpl.rcParams['ps.fonttype'] = 0` at the top of the function without a context manager. Although the matplotlib test framework's `mpl_test_settings` fixture restores rcParams between tests, using `with mpl.rc_context({'ps.fonttype': 0}):` is the idiomatic and safer pattern (other tests in this file that change rcParams do use context managers). Additionally, the test only exercises regular text (`ax.text(...)`) in PS format. Consider adding coverage for: (a) mathtext (`$x^2$`), (b) TeX mode if `usetex` is available (marked `@pytest.mark.skipif`), and (c) EPS format (`format='eps'`), since the primary motivation of this PR is EPS compatibility."
+    }
+  ],
+  "verdict": "REQUEST_CHANGES"
+}

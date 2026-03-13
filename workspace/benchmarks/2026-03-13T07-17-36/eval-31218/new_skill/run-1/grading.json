@@ -1,0 +1,130 @@
+{
+  "expectations": [
+    {
+      "text": "The review identifies at least one concrete issue with file and line reference",
+      "passed": true,
+      "evidence": "The review contains 7 issues, all with specific file paths and line numbers: backend_ps.py:974, backend_ps.py:1000, backend_ps.py:831, backend_ps.py:955, backend_ps.py:982, test_backend_ps.py:293, plus doc directory paths."
+    },
+    {
+      "text": "Every critical or warning issue includes a specific suggested fix, not just a description of the problem",
+      "passed": true,
+      "evidence": "Critical issue 1 (line 974): includes PostScript code snippet showing where to add `newpath`. Critical issue 2 (line 1000): 'Fix: emit a newpath … fill sequence inside the glyph loop'. Critical issue 3 (doc/release): specific filename `ps_fonttype_path.rst` suggested. Warning issue 1 (line 831): 'This dead branch should be removed'. Warning issue 2 (doc/api): specific filename and path given. Warning issue 3 (line 293): full corrected Python code snippet with `rc_context`."
+    },
+    {
+      "text": "The review does not contain false positives (flagged issues that are actually correct code)",
+      "passed": true,
+      "evidence": "All issues verified against the actual diff: (1) No `newpath` after `gsave` in `_draw_text_as_path` — confirmed in diff, PostScript paths are not cleared by `gsave`. (2) Single `fill` at end of glyph loop — confirmed in diff, all glyph paths and rects accumulate before one `fill`. (3) No RST files in changed files list — confirmed by PR files API (5 files, none .rst). (4) Dead code guard in `draw_mathtext` — confirmed by call-chain analysis: `draw_text` returns early for fonttype==0 before calling `draw_mathtext`. (5) Test directly mutates `mpl.rcParams['ps.fonttype'] = 0` without `rc_context` — confirmed in test diff. No flagged issue was found to be correct code."
+    },
+    {
+      "text": "The review checks code changes against repo-specific conventions from the skill",
+      "passed": true,
+      "evidence": "The review explicitly references repo-specific conventions: cites 'repo-conventions.md §11' and 'common-issues.md #10' for PostScript path management, checks for missing what's-new RST entry (skill explicitly lists 'release-note requirements'), checks test patterns (skill lists 'test coverage'), and checks docstring conventions (skill lists 'docstring quality'). The review covers all categories listed in the skill description."
+    },
+    {
+      "text": "The review verdict (APPROVE/REQUEST_CHANGES/COMMENT) is appropriate to the severity of issues found",
+      "passed": true,
+      "evidence": "Verdict is REQUEST_CHANGES. The review identifies 3 critical issues: two PostScript path-management bugs that produce corrupted output, and a missing required what's-new RST file despite the PR checklist claiming it was done. REQUEST_CHANGES is the correct response to critical correctness bugs."
+    },
+    {
+      "text": "The review was posted to GitHub as a formal review with inline comments",
+      "passed": false,
+      "evidence": "GitHub API call `get_pull_request_reviews` for matplotlib/matplotlib#31218 returned an empty array `[]`. No reviews have been posted. The output is only a local `review.json` file. There is no transcript confirming the review was submitted via `create_pull_request_review` or any other mechanism."
+    },
+    {
+      "text": "All files changed in PR #31218 were examined before forming conclusions",
+      "passed": true,
+      "evidence": "PR #31218 changed 5 files: backend_ps.py, matplotlibrc, rcsetup.py, rcsetup.pyi, test_backend_ps.py. The review summary explicitly mentions 'the new validate_ps_fonttype validator correctly extends ps.fonttype to accept 0/3/42' (rcsetup.py examined), issues filed against backend_ps.py and test_backend_ps.py. The matplotlibrc and rcsetup.pyi changes are trivially minor (1-2 line comment/stub updates) and their absence from issues list implies they were reviewed and found correct. There is no transcript to confirm process, but review content demonstrates awareness of all changed components."
+    }
+  ],
+  "summary": {
+    "passed": 6,
+    "failed": 1,
+    "total": 7,
+    "pass_rate": 0.857
+  },
+  "execution_metrics": {
+    "tool_calls": {},
+    "total_tool_calls": null,
+    "total_steps": null,
+    "errors_encountered": 0,
+    "output_chars": 3084,
+    "transcript_chars": 0
+  },
+  "timing": null,
+  "claims": [
+    {
+      "claim": "The PR adds `ps.fonttype = 0` ('path') support to the PS/EPS backend",
+      "type": "factual",
+      "verified": true,
+      "evidence": "Confirmed in diff: `validate_ps_fonttype` adds 'path': 0 to fonttypes dict, and `_draw_text_as_path` method added to RendererPS"
+    },
+    {
+      "claim": "A new `_draw_text_as_path` method is dispatched from `draw_tex`, `draw_text`, and `draw_mathtext`",
+      "type": "factual",
+      "verified": true,
+      "evidence": "Confirmed in diff: each of those three methods has a guard `if mpl.rcParams['ps.fonttype'] == 0: return self._draw_text_as_path(...)`"
+    },
+    {
+      "claim": "The new `validate_ps_fonttype` validator correctly extends `ps.fonttype` to accept 0/3/42",
+      "type": "quality",
+      "verified": true,
+      "evidence": "rcsetup.py diff shows fonttypes dict with 'type3':3, 'truetype':42, 'path':0 and validator checks against these values"
+    },
+    {
+      "claim": "The changed-files list contains no RST files at all",
+      "type": "factual",
+      "verified": true,
+      "evidence": "PR files API returned 5 files: backend_ps.py, matplotlibrc, rcsetup.py, rcsetup.pyi, test_backend_ps.py — none are .rst files"
+    },
+    {
+      "claim": "Missing `newpath` before path accumulation in `_draw_text_as_path`",
+      "type": "factual",
+      "verified": true,
+      "evidence": "Diff confirms: `_draw_text_as_path` emits `gsave` then immediately writes translate/rotate/scale transforms and begins accumulating glyph paths with no `newpath` command"
+    },
+    {
+      "claim": "All glyphs and rects are accumulated into one composite path and filled with a single `fill` at the very end",
+      "type": "factual",
+      "verified": true,
+      "evidence": "Diff confirms: glyph loop writes path segments, rect loop writes more path segments, then `self._pswriter.write('fill\\n')` is called once outside both loops"
+    },
+    {
+      "claim": "The `ps.fonttype == 0` guard in `draw_mathtext` is unreachable dead code",
+      "type": "factual",
+      "verified": true,
+      "evidence": "Confirmed by call-chain in diff: `draw_text` checks `ps.fonttype == 0` and returns early before reaching `if ismath: return self.draw_mathtext(...)`, so `draw_mathtext` is only called when fonttype != 0"
+    },
+    {
+      "claim": "References to repo-conventions.md §11 and common-issues.md #10",
+      "type": "factual",
+      "verified": false,
+      "evidence": "The skill references these files but their section content is not available for verification. The specific section numbers §11 and #10 cannot be confirmed; they may be hallucinated. The underlying PostScript guidance is correct regardless."
+    },
+    {
+      "claim": "test_fonttype_path mutates rcParams directly without rc_context",
+      "type": "factual",
+      "verified": true,
+      "evidence": "Test diff shows `mpl.rcParams['ps.fonttype'] = 0` set at function scope with no `with mpl.rc_context(...)` wrapper and no cleanup/teardown"
+    }
+  ],
+  "user_notes_summary": null,
+  "eval_feedback": {
+    "suggestions": [
+      {
+        "assertion": "The review was posted to GitHub as a formal review with inline comments",
+        "reason": "This is the most important behavioral expectation and it failed — the review was written to a local JSON file but never submitted to GitHub. This is a critical workflow gap. Consider adding a companion assertion that checks the review JSON contains an `html_url` or `id` field that proves GitHub accepted it, or verify via get_pull_request_reviews that at least one review exists from the bot account."
+      },
+      {
+        "assertion": "The review does not contain false positives (flagged issues that are actually correct code)",
+        "reason": "The assertion passed, but the PostScript `newpath` issue (critical #1) is nuanced: after `clip` in PostScript, implementations typically clear the current path, meaning the `newpath` may be defensive rather than strictly necessary to fix a definite bug. A more precise assertion would check that claimed bugs are reproducible or at least that the reviewer acknowledged uncertainty about edge cases."
+      },
+      {
+        "reason": "No assertion checks whether the review's section references (repo-conventions.md §11, common-issues.md #10) are accurate or hallucinated. The review fabricated specific section numbers that cannot be verified — a false authority pattern that, if present, undermines reviewer credibility. An assertion like 'cited references exist and contain the stated content' would catch this."
+      },
+      {
+        "reason": "No assertion checks that the review covers the `matplotlibrc` and `rcsetup.pyi` changes, which are part of the diff. Even though they are trivial, a thorough review should acknowledge them. Adding 'The review addresses all 5 changed files' would be more precise than the current 'examined' framing."
+      }
+    ],
+    "overall": "The evals mostly test the right things but the most critical expectation (GitHub posting) failed. The false-positive check passes but misses a subtle nuance in the newpath claim. Several assertions check surface-level properties (file references, fix present) without verifying correctness of the technical claims themselves."
+  }
+}

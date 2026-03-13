@@ -1,0 +1,55 @@
+{
+  "pr": "matplotlib/matplotlib#31218",
+  "summary": "This PR adds `ps.fonttype = 0` ('path') support to the PS/EPS backend, converting all text to path outlines and bypassing font embedding. This is a useful feature that mirrors `svg.fonttype = 'path'`. The implementation structure is reasonable — a new `_draw_text_as_path` method is dispatched from `draw_tex`, `draw_text`, and `draw_mathtext`, and the new `validate_ps_fonttype` validator correctly extends `ps.fonttype` to accept 0/3/42. However, the PR has two critical PostScript path-management bugs that will produce corrupted output, a missing what's-new RST file (claimed done in the checklist but absent from the diff), a missing behavior API-change RST, and a test that leaks rcParam state.",
+  "issues": [
+    {
+      "file": "lib/matplotlib/backends/backend_ps.py",
+      "line": 974,
+      "severity": "critical",
+      "comment": "Missing `newpath` before path accumulation in `_draw_text_as_path`. PostScript's `gsave` saves the graphics state but does NOT clear the current path. Any path segments accumulated by a prior drawing operation (e.g., the previous call to `_draw_ps`) will still be live when the glyph paths are appended, causing them to be included in the final `fill`. Per the repo's documented PostScript convention (repo-conventions.md §11), a `newpath` call must appear immediately after `gsave` (or after `_get_clip_cmd`) before any `moveto`/`lineto` segments are accumulated.\n\n```postscript\n% REQUIRED fix:\ngsave\nnewpath         ← add this\n... clip ...\ntranslate rotate scale\n... path segments ...\nfill\ngrestore\n```"
+    },
+    {
+      "file": "lib/matplotlib/backends/backend_ps.py",
+      "line": 1000,
+      "severity": "critical",
+      "comment": "All glyphs and rects are accumulated into one composite path and filled with a single `fill` at the very end. Per the repo's documented PostScript convention (repo-conventions.md §11, common-issues.md #10), each glyph must be filled individually — one `fill` per glyph — to match the behavior of the PDF and SVG backends. Accumulating every glyph into a single path produces incorrect rendering when:\n- Glyphs overlap (the overlapping region is counted as 'outside' by the even-odd fill rule and punches a hole).\n- Text has partial transparency (the whole string is treated as one shape).\n\nFix: emit a `newpath … fill` sequence inside the glyph loop (and similarly for each rect), rather than collecting all segments first."
+    },
+    {
+      "file": "doc/release/next_whats_new",
+      "line": 0,
+      "severity": "critical",
+      "comment": "No `doc/release/next_whats_new/*.rst` file is present for this new feature. The PR template checkbox for 'New Features and API Changes are noted with a directive and release note' is checked, but the changed-files list contains no RST files at all. Adding `ps.fonttype = 0` / `'path'` is a new user-visible capability and requires a what's-new entry per the review checklist (§4 of SKILL.md). Please add a file such as `doc/release/next_whats_new/ps_fonttype_path.rst` documenting the new feature."
+    },
+    {
+      "file": "lib/matplotlib/backends/backend_ps.py",
+      "line": 831,
+      "severity": "warning",
+      "comment": "The `ps.fonttype == 0` guard inserted at the top of `draw_mathtext` is unreachable dead code. The call chain is: `draw_text` → checks `ps.fonttype == 0` and returns early via `_draw_text_as_path(…, ismath)` before ever calling `draw_mathtext`. No caller in the codebase invokes `draw_mathtext` directly for fonttype-0 text. This dead branch should be removed to avoid confusion."
+    },
+    {
+      "file": "doc/api/next_api_changes/behavior",
+      "line": 0,
+      "severity": "warning",
+      "comment": "No `doc/api/next_api_changes/behavior/*.rst` file documents that `ps.fonttype` now accepts the new value `0` / `'path'`. Extending an existing rcParam's accepted values is a behavior change and requires an entry in `doc/api/next_api_changes/behavior/` (not `behavior_changes/`). Example: `doc/api/next_api_changes/behavior/ps_fonttype_path.rst`."
+    },
+    {
+      "file": "lib/matplotlib/tests/test_backend_ps.py",
+      "line": 293,
+      "severity": "warning",
+      "comment": "`test_fonttype_path` mutates `mpl.rcParams[\"ps.fonttype\"] = 0` directly without wrapping the change in `mpl.rc_context`. This leaks the modified rcParam value to all tests that run after it in the same session, which can cause spurious failures in other test functions that expect the default `ps.fonttype = 3`. Fix:\n\n```python\ndef test_fonttype_path():\n    \"\"\"Test ps.fonttype = 0 (path) converts text to outlines, no fonts.\"\"\"\n    with mpl.rc_context({\"ps.fonttype\": 0}):\n        fig, ax = plt.subplots()\n        ax.text(0.25, 0.5, \"Hello path mode!\")\n        ax.set_title(\"Title $x^2$\")\n        buf = io.BytesIO()\n        fig.savefig(buf, format=\"ps\")\n        content = buf.getvalue()\n    assert b'/FontType' not in content\n    assert b'glyphshow' not in content\n    assert b'fill' in content\n```"
+    },
+    {
+      "file": "lib/matplotlib/backends/backend_ps.py",
+      "line": 955,
+      "severity": "nit",
+      "comment": "`_draw_text_as_path` uses an inline comment (`# Draw text as path outlines, bypassing font embedding.`) as its 'docstring'. All other methods in `RendererPS` (including private ones like `_draw_ps`, `_logwarn_once`) use proper triple-quoted docstrings. Please replace the comment with a real docstring:\n\n```python\ndef _draw_text_as_path(self, gc, x, y, s, prop, angle, ismath):\n    \"\"\"Draw text *s* as filled path outlines, bypassing font embedding.\"\"\"\n```"
+    },
+    {
+      "file": "lib/matplotlib/backends/backend_ps.py",
+      "line": 982,
+      "severity": "nit",
+      "comment": "`Path(verts * 64, codes)` followed by `.scale(scale / 64.0)` in the glyph transform: the factor of 64 cancels out algebraically and adds unnecessary complexity. The code is equivalent to `Path(verts, codes)` with `.scale(scale)`. Consider simplifying to avoid confusion about where the magic constant `64` comes from."
+    }
+  ],
+  "verdict": "REQUEST_CHANGES"
+}
