@@ -1,0 +1,97 @@
+{
+  "pr": "aircode610/Clarus#15",
+  "summary": "PR #15 ('Conflict resolving') rewrites conflict_resolving.py to replace two TODO placeholders with real LLM-backed comparators (get_llm_answer_with_parent, get_llm_answer_without_parent), loads prompts from YAML files, and adds an assertion_table lookup for node content. It also relocates the order_the_graph docstring and deletes the test_1 fixture. Several blocking defects are present: unguarded json.loads on LLM output, four hardcoded literals that corrupt every LLM call, a broken cmp_to_key comparator (returns bool instead of int), and a module-level file-open that crashes on import when CWD is not the repo root.",
+  "issues": [
+    {
+      "file": "conflict_resolving.py",
+      "line": 479,
+      "severity": "critical",
+      "comment": "json.loads(content) in get_llm_answer_with_parent is not wrapped in try/except. LLM output is non-deterministic; a malformed response raises an unhandled json.JSONDecodeError that crashes the entire graph-ordering pipeline. Fix: wrap in try/except (json.JSONDecodeError, ValueError) and return a safe default (e.g., True) or re-raise with context."
+    },
+    {
+      "file": "conflict_resolving.py",
+      "line": 498,
+      "severity": "critical",
+      "comment": "json.loads(content) in get_llm_answer_without_parent has the same missing try/except guard as the sibling method. Both callers are on the hot path (called during every sort comparison), so a single bad LLM response aborts a full ordering run. Same fix required."
+    },
+    {
+      "file": "conflict_resolving.py",
+      "line": 460,
+      "severity": "critical",
+      "comment": "get_llm_answer_with_parent passes four hardcoded literals to the prompt instead of the actual runtime values — all four must be fixed together: (1) 'parent_id': 'P1' should be the actual parent node ID (the caller compare_two_relations does not even receive a parent_id; it needs to be threaded through); (2) 'relation_type': 'cause' should be rel1.relationship_type (both relations share the same type when this path is taken); (3) 'confidence': 0.8 should be rel1.confidence; (4) 'confidence': 0.75 should be rel2.confidence. Passing hardcoded values means the LLM always reasons about a phantom 'P1 cause' relationship with fixed scores, making every tie-break comparison semantically wrong."
+    },
+    {
+      "file": "conflict_resolving.py",
+      "line": 556,
+      "severity": "critical",
+      "comment": "The comparison() inner function inside sort_all_children is annotated '-> bool' and returns True/False. cmp_to_key requires a comparator that returns a negative int (less-than), zero (equal), or positive int (greater-than). Returning True (==1, always 'greater') and False (==0, always 'equal') means the sort can never express 'first < second', producing incorrect and non-deterministic ordering for any list longer than one element. Fix: return -1 when the first node should come before the second, 0 when equal, 1 otherwise — i.e., map the bool answer to 1 if True else -1, and handle None/equal cases explicitly as 0."
+    },
+    {
+      "file": "conflict_resolving.py",
+      "line": 528,
+      "severity": "critical",
+      "comment": "compare_two_relations uses getattr(relation1, 'relationship_type', None) which can return None, and the weights dict does not contain a 'contradiction' key either. Both cases cause weights[relation_type1] to raise KeyError, crashing any call that involves a contradiction-type relationship or a relation with a missing field. Fix: guard with 'if relation_type1 not in weights or relation_type2 not in weights: return True' before the lookup, and add 'contradiction' to the weights dict or explicitly exclude it upstream."
+    },
+    {
+      "file": "conflict_resolving.py",
+      "line": 16,
+      "severity": "critical",
+      "comment": "The YAML file is opened at module import time via a bare 'with open(Path(...))' at the top level. If the Python working directory is not the repo root (e.g., when imported from a test runner, Streamlit's internal reload, or CI), this raises FileNotFoundError before any class or function is available. Fix: move the load inside build_prompt_from_yaml() (lazy, with Path(__file__).parent / 'prompts_in_conflict_resolving.yaml' for a reliable path), or at minimum use Path(__file__).parent to anchor the path."
+    },
+    {
+      "file": "conflict_resolving.py",
+      "line": 454,
+      "severity": "warning",
+      "comment": "get_llm_answer_with_parent instantiates a new ChatOpenAI(model='gpt-4o-mini', temperature=0, openai_api_key=os.getenv('OPENAI_API_KEY')) on every call. This is called during every sort comparison, potentially dozens of times per order_the_graph invocation. The established project pattern (see workflows/prose.py, workflows/idea_capture.py) is to initialize self.llm once in __init__ and reuse it. Fix: add self.llm = ChatOpenAI(model='gpt-4o-mini', temperature=0) to GlobalGraph.__init__ and replace the per-call constructor with self.llm."
+    },
+    {
+      "file": "conflict_resolving.py",
+      "line": 484,
+      "severity": "warning",
+      "comment": "get_llm_answer_without_parent has the same per-call ChatOpenAI instantiation problem as get_llm_answer_with_parent. Same fix applies: use self.llm."
+    },
+    {
+      "file": "conflict_resolving.py",
+      "line": 0,
+      "severity": "warning",
+      "comment": "The test_1 fixture (20 Relationship objects covering three distinct contradiction cycles and one mixed-type cycle) was deleted in this PR with no replacement. Per the project's known-issues record, deleting test fixtures without replacement degrades the only available manual verification data for the SCC/conflict-resolution path. At minimum, move test_1 to a comment block or a dedicated test file rather than silently removing it."
+    },
+    {
+      "file": "conflict_resolving.py",
+      "line": 451,
+      "severity": "warning",
+      "comment": "get_llm_answer_with_parent and get_llm_answer_without_parent are new LLM-backed methods with branching logic (JSON extraction, markdown fence stripping) and no tests. The project has no test suite, but the skill flags missing coverage for new LLM post-processing functions as a warning. Even a single unit test with a mocked ChatOpenAI response would catch the json.loads crash and the hardcoded-literal bugs."
+    },
+    {
+      "file": "prompts_in_conflict_resolving.yaml",
+      "line": 0,
+      "severity": "warning",
+      "comment": "Three YAML prompt files (prompts_in_conflict_resolving.yaml, prompts_in_idea_capture.yaml, prompts_in_structure.yaml) are added at the repo root. This creates a fragile runtime dependency on the working directory (see the blocking issue on the module-level open()). Convention for the project is to keep all runtime assets co-located with the module that uses them or inside the relevant package directory (e.g., workflows/). Consider moving these under workflows/ and using Path(__file__).parent-relative loading."
+    },
+    {
+      "file": "conflict_resolving.py",
+      "line": 6,
+      "severity": "nit",
+      "comment": "'import streamlit' on line 6 is redundant — 'import streamlit as st' on line 7 already imports the module. The bare import is never referenced. Remove it."
+    },
+    {
+      "file": "conflict_resolving.py",
+      "line": 13,
+      "severity": "nit",
+      "comment": "'from structure import Relationship' is inconsistent with the codebase convention of 'from models import Relationship' (see conventions.md section 5 and models/__init__.py which re-exports Relationship). The file should import from models, not directly from the sibling module 'structure'."
+    },
+    {
+      "file": "conflict_resolving.py",
+      "line": 457,
+      "severity": "nit",
+      "comment": "Stale comment '# assuming `llm` is your model' is leftover developer scaffolding and should be removed before merge."
+    },
+    {
+      "file": "conflict_resolving.py",
+      "line": 523,
+      "severity": "nit",
+      "comment": "Using getattr(relation1, 'relationship_type', None) for a required Pydantic BaseModel field is unnecessarily defensive and misleading — it implies the field might not exist on a valid Relationship object. Direct attribute access (relation1.relationship_type) is clearer and consistent with how the rest of the codebase accesses model fields."
+    }
+  ],
+  "verdict": "REQUEST_CHANGES"
+}

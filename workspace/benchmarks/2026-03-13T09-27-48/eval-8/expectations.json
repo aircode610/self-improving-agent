@@ -1,0 +1,21 @@
+[
+  "The review identifies that in `get_assertions_and_relations.py`, the `relations` task branch incorrectly assigns `prompt_for_grazie_api_models = ASSERTION_PROMPT_FOR_GRAZIE_API_MODELS` instead of `RELATION_PROMPT_FOR_GRAZIE_API_MODELS`, meaning the wrong system prompt is sent to the Grazie API when annotating relations.",
+
+  "The review flags that `extract_relations` (in both `get_assertions_and_relations.py` and `get_assertions_and_relations_openai.py`) uses `if arg1 and arg2:` to check whether both arguments were found, which evaluates to `False` when `arg1 == 0` (the first assertion has index 0). This causes any relation whose first argument is the opening assertion to be silently dropped.",
+
+  "The review catches the potential `IndexError` in the assertion post-processing loop: `assertion[0].isdigit()` is called without first checking that `assertion` is non-empty. Since `generated_text.split('\\n')` can produce empty strings, this will raise an `IndexError` on blank lines.",
+
+  "The review identifies the silent data-loss / index misalignment bug in the relations parsing block: when `json.loads` raises an exception, the `except` branch skips `output_annotations.append(...)` but `ids.append(idx)` has already been called earlier. The final `zip(output_annotations, ids)` will therefore pair each relation list with the wrong paper ID for all subsequent records.",
+
+  "The review points out the case-sensitivity bug in `prepare_data.py`: `str(paper.title).lower()` is compared against the raw `keyword_string` argument, which is not lowercased. Any keyword containing uppercase letters (e.g., `--keyword_string='Semantic Parsing'`) will silently match zero papers.",
+
+  "The review questions whether the generated/output data files (`data/generated_assertions.jsonl`, `data/generated_relations.jsonl`, `data/selected_paper_abstracts.jsonl`) should be committed to the repository, and notes the absence of a `.gitignore` entry to exclude these pipeline artifacts.",
+
+  "The review identifies that `acl-anthology` is placed under `[tool.poetry.group.dev.dependencies]` in `pyproject.toml`, but it is a runtime dependency of `src/prepare_data.py` (not a dev-only tool). It should appear under `[tool.poetry.dependencies]`.",
+
+  "The review notes that `generate_with_unsloth` in `get_assertions_and_relations.py` hard-codes `.to('cuda')` when moving tensors to the device, with no fallback for CPU-only or MPS environments, making the script fail silently on machines without a CUDA GPU.",
+
+  "The review observes that `get_assertions_and_relations_openai.py` relies entirely on the `OPENAI_API_KEY` environment variable being set, but provides no early validation or helpful error message if it is absent, leading to a confusing `openai.AuthenticationError` at the first API call rather than a clear startup check.",
+
+  "The review notes the complete absence of tests for any of the new logic — including the `extract_relations` matching algorithm, the assertion post-processing strip/split logic, and the JSON repair heuristics — which are all non-trivial and contain the bugs noted above."
+]

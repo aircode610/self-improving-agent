@@ -1,0 +1,136 @@
+{
+  "expectations": [
+    {
+      "text": "The review identifies that `compare_two_relations` will crash with a `KeyError` because `getattr(relation1, 'relationship_type', None)` can return `None`, and `None` is not a key in the `weights` dict — the defensive `getattr` introduces a new failure mode instead of fixing one.",
+      "passed": true,
+      "evidence": "review.json issue at line 528 (critical): 'compare_two_relations uses getattr(relation1, \"relationship_type\", None) which can return None, and the weights dict does not contain a \"contradiction\" key either. Both cases cause weights[relation_type1] to raise KeyError, crashing any call that involves a contradiction-type relationship or a relation with a missing field.' The nit at line 523 also reinforces this by calling out the getattr as unnecessarily defensive on a required Pydantic field."
+    },
+    {
+      "text": "The review flags that the `comparison` function inside `sort_all_children` is annotated and used as returning `bool`, but `cmp_to_key` requires a comparator returning a negative int, zero, or positive int — returning `True`/`False` will produce incorrect sort ordering.",
+      "passed": true,
+      "evidence": "review.json issue at line 556 (critical): 'The comparison() inner function inside sort_all_children is annotated \"-> bool\" and returns True/False. cmp_to_key requires a comparator that returns a negative int (less-than), zero (equal), or positive int (greater-than). Returning True (==1, always \"greater\") and False (==0, always \"equal\") means the sort can never express \"first < second\", producing incorrect and non-deterministic ordering for any list longer than one element.'"
+    },
+    {
+      "text": "The review catches that `get_llm_answer_with_parent` hardcodes `parent_id: 'P1'`, `relation_type: 'cause'`, `confidence: 0.8`, and `confidence: 0.75` instead of using the actual values from `rel1` and `rel2`, meaning the LLM always receives wrong/fabricated context.",
+      "passed": true,
+      "evidence": "review.json issue at line 460 (critical): 'get_llm_answer_with_parent passes four hardcoded literals to the prompt instead of the actual runtime values — all four must be fixed together: (1) \"parent_id\": \"P1\" should be the actual parent node ID; (2) \"relation_type\": \"cause\" should be rel1.relationship_type; (3) \"confidence\": 0.8 should be rel1.confidence; (4) \"confidence\": 0.75 should be rel2.confidence. Passing hardcoded values means the LLM always reasons about a phantom \"P1 cause\" relationship...'"
+    },
+    {
+      "text": "The review notes the duplicate Streamlit import: both `import streamlit` (bare) and `import streamlit as st` appear at the top of the file, which is redundant and suggests a sloppy merge.",
+      "passed": true,
+      "evidence": "review.json nit issue at line 6: '\"import streamlit\" on line 6 is redundant — \"import streamlit as st\" on line 7 already imports the module. The bare import is never referenced. Remove it.' Also flagged in the transcript summary as 'Duplicate `import streamlit` (line 6, unused)'."
+    },
+    {
+      "text": "The review identifies that `GlobalGraph.__init__` now requires `assertions: List[Assertion]` as a mandatory second argument, making this a breaking change for all existing call sites that construct a `GlobalGraph` with only `relationships`.",
+      "passed": false,
+      "evidence": "No issue in review.json covers this breaking API change. The only references to `GlobalGraph.__init__` in the review are as part of a suggested fix: 'add self.llm = ChatOpenAI(...) to GlobalGraph.__init__'. The review does not identify that adding `assertions: List[Assertion]` as a mandatory parameter breaks existing callers."
+    },
+    {
+      "text": "The review points out that `prompts_in_conflict_resolving.yaml` is loaded at module import time (top-level `with open(...)`) with no error handling, so importing the module will raise a `FileNotFoundError` if the YAML file is absent from the working directory.",
+      "passed": true,
+      "evidence": "review.json issue at line 16 (critical): 'The YAML file is opened at module import time via a bare \"with open(Path(...))\" at the top level. If the Python working directory is not the repo root (e.g., when imported from a test runner, Streamlit's internal reload, or CI), this raises FileNotFoundError before any class or function is available.'"
+    },
+    {
+      "text": "The review identifies that `os.getenv('OPENAI_API_KEY')` is never validated for `None`, and that a brand-new `ChatOpenAI` instance is constructed on every single LLM call instead of being created once and reused, which is both unsafe and inefficient.",
+      "passed": false,
+      "evidence": "The review (warning at line 454 and 484) clearly identifies the per-call ChatOpenAI instantiation: 'get_llm_answer_with_parent instantiates a new ChatOpenAI(model=\"gpt-4o-mini\", temperature=0, openai_api_key=os.getenv(\"OPENAI_API_KEY\")) on every call.' However, the review never explicitly flags that `os.getenv('OPENAI_API_KEY')` is never validated for `None` — it simply mentions the env var in passing as part of the per-call pattern. The specific 'unsafe' aspect of a potential `None` API key propagating silently is not identified."
+    },
+    {
+      "text": "The review notes that the JSON extraction logic in both `get_llm_answer_with_parent` and `get_llm_answer_without_parent` only strips a plain ` ``` ` code fence but does not handle the common ` ```json ``` ` variant, and there is no try/except around `json.loads`, so a malformed LLM response will propagate an unhandled exception.",
+      "passed": false,
+      "evidence": "The review (critical issues at lines 479 and 498) clearly catches the missing try/except around json.loads in both methods. However, it never mentions that only a plain ``` fence is stripped while the common ```json variant is unhandled. The expectation requires BOTH aspects to be identified; the ```json fence gap is absent from the review."
+    },
+    {
+      "text": "The review identifies a structural inconsistency in `prompts_in_structure.yaml`: `evaluate_relationships_using_rst` and `analyzing_rhetorical_relationships` are defined with `- messages:` (a list item under the prompt key) while `evaluate_relationships_writing_styles` uses `messages:` (a plain mapping key), meaning any code that uniformly accesses `prompts[name]['messages']` will fail for the first two prompts.",
+      "passed": false,
+      "evidence": "No issue in review.json addresses the structural YAML inconsistency in prompts_in_structure.yaml. The review mentions YAML files only in the context of their placement at the repo root (fragile path dependency warning) and the module-level open() bug, not regarding any internal YAML structural mismatch between `- messages:` and `messages:` keys."
+    },
+    {
+      "text": "The review notes that no unit or integration tests were added for the two new LLM-calling methods (`get_llm_answer_with_parent`, `get_llm_answer_without_parent`), leaving the critical conflict-resolution logic — which previously had deterministic stubs — entirely untested.",
+      "passed": true,
+      "evidence": "review.json warning at line 451: 'get_llm_answer_with_parent and get_llm_answer_without_parent are new LLM-backed methods with branching logic (JSON extraction, markdown fence stripping) and no tests. The project has no test suite, but the skill flags missing coverage for new LLM post-processing functions as a warning.' Also flagged in the transcript summary: 'New LLM methods have no test coverage'."
+    }
+  ],
+  "summary": {
+    "passed": 6,
+    "failed": 4,
+    "total": 10,
+    "pass_rate": 0.6
+  },
+  "execution_metrics": {
+    "tool_calls": {
+      "ToolSearch": 1,
+      "Read": 3,
+      "mcp__github__get_pull_request": 1,
+      "mcp__github__get_pull_request_files": 1
+    },
+    "total_tool_calls": 6,
+    "total_steps": 6,
+    "errors_encountered": 0,
+    "output_chars": 4890,
+    "transcript_chars": 2650
+  },
+  "timing": null,
+  "claims": [
+    {
+      "claim": "The PR rewrites two TODO placeholders with real LLM-backed comparators",
+      "type": "factual",
+      "verified": true,
+      "evidence": "Summary states 'replaces two TODO placeholders with real LLM-backed comparators (get_llm_answer_with_parent, get_llm_answer_without_parent)' — consistent with the diff analysis reflected in the critical issues found"
+    },
+    {
+      "claim": "get_llm_answer_with_parent contains exactly 4 hardcoded literals",
+      "type": "factual",
+      "verified": true,
+      "evidence": "Issue at line 460 enumerates all four: parent_id='P1', relation_type='cause', confidence=0.8, confidence=0.75 — the review's enumeration matches the expectation exactly"
+    },
+    {
+      "claim": "The sort comparator bug makes ordering 'non-deterministic'",
+      "type": "quality",
+      "verified": true,
+      "evidence": "Issue at line 556 explains the mechanics: True==1 (always 'greater') and False==0 (always 'equal') removes the ability to express less-than, which does yield incorrect sort output though the word 'non-deterministic' slightly overstates — the sort is deterministic but wrong"
+    },
+    {
+      "claim": "Verdict is REQUEST_CHANGES with 6 critical / 5 warning / 4 nit issues",
+      "type": "factual",
+      "verified": true,
+      "evidence": "review.json has 6 critical, 5 warning, 4 nit issues and verdict=REQUEST_CHANGES, matching the transcript summary exactly"
+    },
+    {
+      "claim": "The review consulted skill conventions and reference files",
+      "type": "process",
+      "verified": true,
+      "evidence": "Transcript Steps 2-4 show reads of SKILL.md, conventions.md, and common-issues.md before fetching PR data"
+    },
+    {
+      "claim": "The review does not post to GitHub",
+      "type": "process",
+      "verified": true,
+      "evidence": "Only 6 tool calls total; none involve mcp__github__create_review or any write operation to GitHub — review was saved to local file only"
+    }
+  ],
+  "user_notes_summary": {
+    "uncertainties": [],
+    "needs_review": [],
+    "workarounds": []
+  },
+  "eval_feedback": {
+    "suggestions": [
+      {
+        "assertion": "The review identifies that `GlobalGraph.__init__` now requires `assertions: List[Assertion]` as a mandatory second argument, making this a breaking change for all existing call sites that construct a `GlobalGraph` with only `relationships`.",
+        "reason": "This is a strong discriminating assertion — the breaking-change risk is real and non-obvious — but the executor only fetched the PR diff (6 tool calls total) and did not call get_file_contents on existing callers of GlobalGraph to verify the impact. The assertion tests whether the reviewer thought to look for call sites, which is good. Consider pairing it with an assertion about the specific call-site files (e.g., workflows/ or app.py) where the break would manifest."
+      },
+      {
+        "assertion": "The review notes that the JSON extraction logic... only strips a plain ` ``` ` code fence but does not handle the common ` ```json ``` ` variant",
+        "reason": "This is a fine-grained code-reading assertion. The review correctly caught the missing try/except (the bigger problem) but missed the fence variant. Worth keeping since it distinguishes a thorough review from a partial one, but the assertion is somewhat weak if the primary goal is catching the crash — consider splitting it into two separate expectations."
+      },
+      {
+        "reason": "No assertion checks whether the review examined the `GlobalGraph.__init__` signature change itself (assertions parameter) — a critical API break that was missed entirely. An assertion like 'the review flags that adding assertions as a required parameter to GlobalGraph.__init__ is a breaking change' would have caught this gap."
+      },
+      {
+        "reason": "No assertion checks that the review correctly distinguished between the two YAML loading bugs (module-level open vs. fragile path). The review did flag the module-level open as critical but treated YAML placement as a separate warning — a good judgment call that no assertion validates."
+      }
+    ],
+    "overall": "The evals are generally well-targeted and discriminating — they test specific code-reading observations that require actually reading the diff. The 4 failures reveal real gaps in the review (missing GlobalGraph breaking-change, missing ```json fence variant, missing None validation, missing prompts_in_structure.yaml structural bug). The main improvement would be splitting compound assertions (expectation 7 combines two distinct issues) and adding coverage for the breaking-change scenario."
+  }
+}

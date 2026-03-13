@@ -1,0 +1,134 @@
+{
+  "expectations": [
+    {
+      "text": "The review identifies that in `get_assertions_and_relations.py`, the `relations` task branch incorrectly assigns `prompt_for_grazie_api_models = ASSERTION_PROMPT_FOR_GRAZIE_API_MODELS` instead of `RELATION_PROMPT_FOR_GRAZIE_API_MODELS`, meaning the wrong system prompt is sent to the Grazie API when annotating relations.",
+      "passed": true,
+      "evidence": "Issue #6 in review.json: 'Wrong prompt constant for the relations task. When task == \"relations\", prompt_for_grazie_api_models is set to ASSERTION_PROMPT_FOR_GRAZIE_API_MODELS (the assertion segmentation instruction) instead of RELATION_PROMPT_FOR_GRAZIE_API_MODELS. RELATION_PROMPT_FOR_GRAZIE_API_MODELS is defined at module level but never used anywhere.'"
+    },
+    {
+      "text": "The review flags that `extract_relations` (in both `get_assertions_and_relations.py` and `get_assertions_and_relations_openai.py`) uses `if arg1 and arg2:` to check whether both arguments were found, which evaluates to `False` when `arg1 == 0` (the first assertion has index 0). This causes any relation whose first argument is the opening assertion to be silently dropped.",
+      "passed": true,
+      "evidence": "Issue #7 in review.json: '`if arg1 and arg2:` in `extract_relations` is falsy when `arg1 == 0` (the first assertion in the list). Any relation where argument1 is assertion index 0 is silently dropped because Python treats integer 0 as falsy... Fix: change the guard to `if arg1 is not None and arg2 is not None:`... The identical bug exists in `src/get_assertions_and_relations_openai.py`.'"
+    },
+    {
+      "text": "The review catches the potential `IndexError` in the assertion post-processing loop: `assertion[0].isdigit()` is called without first checking that `assertion` is non-empty. Since `generated_text.split('\\n')` can produce empty strings, this will raise an `IndexError` on blank lines.",
+      "passed": true,
+      "evidence": "Issue #9 in review.json: '`if assertion[0].isdigit() or assertion.startswith(\"-\"):` raises `IndexError` when `assertion` is an empty string. `generated_text.split(\"\\n\")` can produce empty strings (e.g., a trailing newline). There is no empty-string guard here... Fix: add `if not assertion: continue` before the index check.'"
+    },
+    {
+      "text": "The review identifies the silent data-loss / index misalignment bug in the relations parsing block: when `json.loads` raises an exception, the `except` branch skips `output_annotations.append(...)` but `ids.append(idx)` has already been called earlier. The final `zip(output_annotations, ids)` will therefore pair each relation list with the wrong paper ID for all subsequent records.",
+      "passed": true,
+      "evidence": "Issue #8 in review.json: 'ids/output_annotations length mismatch on JSON parse failure. `ids.append(idx)` is called unconditionally before the `try/except` block, but `output_annotations.append(extracted_relations)` is only called on success. When a JSON parse fails, `ids` grows by one but `output_annotations` does not. The final `zip(output_annotations, ids)` silently truncates, mapping every subsequent record to the wrong ID.'"
+    },
+    {
+      "text": "The review points out the case-sensitivity bug in `prepare_data.py`: `str(paper.title).lower()` is compared against the raw `keyword_string` argument, which is not lowercased. Any keyword containing uppercase letters (e.g., `--keyword_string='Semantic Parsing'`) will silently match zero papers.",
+      "passed": true,
+      "evidence": "Issue #4 in review.json: 'Case-sensitivity bug: `keyword_string in str(paper.title).lower()` lowercases the title but NOT the keyword. Passing `--keyword_string=\"Semantic Parsing\"` returns zero results because the uppercase letters never match the lowercased title. Fix: `keyword_string.lower() in str(paper.title).lower()`.'"
+    },
+    {
+      "text": "The review questions whether the generated/output data files (`data/generated_assertions.jsonl`, `data/generated_relations.jsonl`, `data/selected_paper_abstracts.jsonl`) should be committed to the repository, and notes the absence of a `.gitignore` entry to exclude these pipeline artifacts.",
+      "passed": true,
+      "evidence": "Issue #12 in review.json (warning severity): 'Generated data files (`data/generated_assertions.jsonl`, `data/generated_relations.jsonl`) are committed to version control... Add `data/*.jsonl` and `data/*.json` to `.gitignore` and document reproduction steps in the README.' Note: `data/selected_paper_abstracts.jsonl` is not explicitly mentioned, but the pattern `data/*.jsonl` covers it."
+    },
+    {
+      "text": "The review identifies that `acl-anthology` is placed under `[tool.poetry.group.dev.dependencies]` in `pyproject.toml`, but it is a runtime dependency of `src/prepare_data.py` (not a dev-only tool). It should appear under `[tool.poetry.dependencies]`.",
+      "passed": false,
+      "evidence": "No mention of `acl-anthology`, `pyproject.toml`, or dev dependencies in the review.json. The review does not examine pyproject.toml at all — only the three Python source files were fetched (Steps 9-11 in the transcript)."
+    },
+    {
+      "text": "The review notes that `generate_with_unsloth` in `get_assertions_and_relations.py` hard-codes `.to('cuda')` when moving tensors to the device, with no fallback for CPU-only or MPS environments, making the script fail silently on machines without a CUDA GPU.",
+      "passed": false,
+      "evidence": "The review raises the general concern about GPU-only imports (Issue #1) but never specifically identifies the hard-coded `.to('cuda')` tensor placement or the lack of CPU/MPS fallback. The `.to('cuda')` issue is not mentioned anywhere in the review.json."
+    },
+    {
+      "text": "The review observes that `get_assertions_and_relations_openai.py` relies entirely on the `OPENAI_API_KEY` environment variable being set, but provides no early validation or helpful error message if it is absent, leading to a confusing `openai.AuthenticationError` at the first API call rather than a clear startup check.",
+      "passed": true,
+      "evidence": "Issue #3 in review.json: '`client = openai.OpenAI()` is constructed with no prior check that `OPENAI_API_KEY` is set in the environment. A missing key produces a cryptic SDK-internal error rather than a helpful message. Add: `api_key = os.environ.get(\"OPENAI_API_KEY\"); if not api_key: raise ValueError(\"OPENAI_API_KEY environment variable is not set.\")` before constructing the client.'"
+    },
+    {
+      "text": "The review notes the complete absence of tests for any of the new logic — including the `extract_relations` matching algorithm, the assertion post-processing strip/split logic, and the JSON repair heuristics — which are all non-trivial and contain the bugs noted above.",
+      "passed": false,
+      "evidence": "No mention of missing tests anywhere in the review.json. The review identifies nits about missing module docstrings and commented-out debug code, but does not flag the absence of tests for any of the new logic."
+    }
+  ],
+  "summary": {
+    "passed": 7,
+    "failed": 3,
+    "total": 10,
+    "pass_rate": 0.7
+  },
+  "execution_metrics": {
+    "tool_calls": {
+      "ToolSearch": 1,
+      "Read": 4,
+      "mcp__github__get_pull_request": 1,
+      "mcp__github__get_pull_request_files": 1,
+      "mcp__github__get_file_contents": 3
+    },
+    "total_tool_calls": 11,
+    "total_steps": 11,
+    "errors_encountered": 0,
+    "output_chars": 4427,
+    "transcript_chars": 2650
+  },
+  "timing": null,
+  "claims": [
+    {
+      "claim": "Eight critical bugs were found",
+      "type": "factual",
+      "verified": true,
+      "evidence": "The review.json lists exactly 9 issues with severity 'critical' (lines 8, 15, 43, 15, 24, 110, 64, 148, 130). The summary says '8 critical bugs' but the issues array has 9 critical entries — a minor inconsistency. The count of 8 is stated in the result summary and the review.json summary field."
+    },
+    {
+      "claim": "The review covers both get_assertions_and_relations.py and get_assertions_and_relations_openai.py for the extract_relations bug",
+      "type": "quality",
+      "verified": true,
+      "evidence": "Issue #7 explicitly states: 'The identical bug exists in src/get_assertions_and_relations_openai.py' and the comment covers both files."
+    },
+    {
+      "claim": "The wrong prompt constant bug uses RELATION_PROMPT_FOR_GRAZIE_API_MODELS defined at module level but never used",
+      "type": "factual",
+      "verified": true,
+      "evidence": "Issue #6 states: 'RELATION_PROMPT_FOR_GRAZIE_API_MODELS is defined at module level but never used anywhere.' This is consistent with the diff obtained from GitHub."
+    },
+    {
+      "claim": "pyproject.toml was reviewed for dependency classification issues",
+      "type": "process",
+      "verified": false,
+      "evidence": "The transcript shows only 3 mcp__github__get_file_contents calls for src/prepare_data.py, src/get_assertions_and_relations.py, and src/get_assertions_and_relations_openai.py. pyproject.toml was not fetched."
+    },
+    {
+      "claim": "The review noted the hard-coded .to('cuda') with no CPU fallback",
+      "type": "quality",
+      "verified": false,
+      "evidence": "Unconditional GPU imports were flagged, but the specific .to('cuda') tensor placement issue was not identified in any issue."
+    },
+    {
+      "claim": "Missing tests were flagged as a concern",
+      "type": "quality",
+      "verified": false,
+      "evidence": "No test-absence issue appears in any of the 15 entries in the review.json issues array."
+    }
+  ],
+  "user_notes_summary": null,
+  "eval_feedback": {
+    "suggestions": [
+      {
+        "assertion": "The review identifies that `acl-anthology` is placed under `[tool.poetry.group.dev.dependencies]` in `pyproject.toml`...",
+        "reason": "This expectation requires the reviewer to fetch and inspect pyproject.toml. The transcript shows only three source files were fetched; pyproject.toml was never read. The assertion tests whether the reviewer proactively explored non-diff files to catch a dependency classification error. This is a good discriminating test — it failed here because the reviewer did not go beyond the immediate diff to inspect the project config."
+      },
+      {
+        "assertion": "The review notes that `generate_with_unsloth` hard-codes `.to('cuda')`...",
+        "reason": "Issue #1 (unconditional GPU imports) and the `.to('cuda')` hard-code are related but distinct bugs. The assertion specifically tests whether the review found the tensor-device issue, not just the import guard issue. A reviewer could (and did) pass on the import guard while missing the device placement. This is a well-scoped discriminating assertion."
+      },
+      {
+        "reason": "No assertion checks for the count consistency in the review — the result summary says '8 critical bugs' but the issues array has 9 critical-severity entries. This internal inconsistency went unnoticed and no assertion would catch it."
+      },
+      {
+        "assertion": "The review notes the complete absence of tests...",
+        "reason": "Missing test coverage is a standard code review concern, but its absence in this review was not caught by any expectation other than this one. The assertion is appropriately discriminating."
+      }
+    ],
+    "overall": "The evals are well-targeted, mixing easy-to-find bugs (wrong constant, falsy-zero) with harder-to-find ones (pyproject.toml dep classification, .to('cuda'), no tests). The 3 failures are genuine misses by the reviewer, not false negatives from poor assertions. One minor improvement: add an assertion verifying the review verdict is REQUEST_CHANGES (which it correctly is) to ensure a trivially-passing review is not generated."
+  }
+}

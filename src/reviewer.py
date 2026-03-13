@@ -1,57 +1,68 @@
 """Reviewer agent: reads a PR via GitHub MCP, reviews using skills, saves results locally."""
 
 import json
-import os
 from datetime import datetime
 from pathlib import Path
 
-import anyio
-from claude_agent_sdk import query, ClaudeAgentOptions, ResultMessage, AssistantMessage, TextBlock
+from claude_agent_sdk import ClaudeAgentOptions
+
+from src.utils import run_agent
+
+PROJECT_ROOT = Path(__file__).parent.parent
+HISTORY_DIR = PROJECT_ROOT / "history" / "reviews"
 
 
-SKILLS_DIR = Path(__file__).parent.parent / "skills" / "pr-review"
-HISTORY_DIR = Path(__file__).parent.parent / "history" / "reviews"
+def _skill_dir(owner: str, repo: str) -> Path:
+    return PROJECT_ROOT / "skills" / owner / repo
 
 
 async def run_reviewer(
     owner: str, repo: str, pr_number: int, github_mcp_config: dict
 ) -> tuple[str, str]:
-    """Review a PR and return (review_id, review_output_text)."""
+    """Review a PR and return (review_id, review_output_text).
 
-    # Check skills exist
-    skill_md = SKILLS_DIR / "SKILL.md"
+    Directory layout:
+      history/reviews/{review_id}/
+        transcript.md          ← execution log for grader
+        outputs/
+          review.json          ← the review output
+    """
+
+    skill_dir = _skill_dir(owner, repo)
+    skill_md = skill_dir / "SKILL.md"
     if not skill_md.exists():
         raise FileNotFoundError(
-            f"No skills found at {SKILLS_DIR}. Run 'init' first:\n"
+            f"No skills found at {skill_dir}. Run 'init' first:\n"
             f"  python -m src.cli init {owner}/{repo}"
         )
 
-    project_root = str(Path(__file__).parent.parent)
     date_str = datetime.now().strftime("%Y-%m-%d")
     review_id = f"{date_str}_pr-{pr_number}"
     review_dir = HISTORY_DIR / review_id
-    review_dir.mkdir(parents=True, exist_ok=True)
+    outputs_dir = review_dir / "outputs"
+    outputs_dir.mkdir(parents=True, exist_ok=True)
+
+    skill_rel = skill_dir.relative_to(PROJECT_ROOT)
+    out_rel = outputs_dir.relative_to(PROJECT_ROOT)
+    transcript_path = str(review_dir / "transcript.md")
 
     prompt = f"""Review PR #{pr_number} in {owner}/{repo}.
 
-First, read and internalize the review skills:
-- Read skills/pr-review/SKILL.md — these are your primary review instructions
-- Read skills/pr-review/repo-conventions.md — repo-specific conventions to enforce
-- Read skills/pr-review/common-issues.md — known pitfalls to watch for
+Step 1 — Load skills:
+- Read {skill_rel}/SKILL.md
+- Follow its instructions to read any reference files it points to
 
-Then use GitHub MCP to read the PR:
-1. get_pull_request — read PR title, description, author, base/head branches
-2. get_pull_request_files — get the full diff/patch for every changed file
-3. get_file_contents — read surrounding source files for context where needed
-4. get_pull_request_status — check CI status
+Step 2 — Read the PR via GitHub MCP:
+1. get_pull_request — title, description, author, branches
+2. get_pull_request_files — full diff for every changed file
+3. get_file_contents — surrounding source files for context where needed (limit to files relevant to the diff)
 
-Perform a thorough review following the loaded skills. For each issue found, classify it as:
+Step 3 — Review following the loaded skill. For each issue, classify as:
 - critical: bugs, security vulnerabilities, data loss risks
-- warning: code quality, performance, missing tests, violations of repo conventions
+- warning: code quality, performance, missing tests, convention violations
 - nit: style, naming, minor improvements
 
-After reviewing, save your findings to history/reviews/{review_id}/review.json using this schema:
-```json
+Step 4 — Save to {out_rel}/review.json:
 {{
   "pr": "{owner}/{repo}#{pr_number}",
   "summary": "Brief overall assessment",
@@ -60,45 +71,41 @@ After reviewing, save your findings to history/reviews/{review_id}/review.json u
       "file": "path/to/file.py",
       "line": 42,
       "severity": "critical|warning|nit",
-      "comment": "Description of the issue and suggested fix"
+      "comment": "Description and suggested fix"
     }}
   ],
   "verdict": "APPROVE|REQUEST_CHANGES|COMMENT"
 }}
-```
 
 Do NOT post to GitHub. Save only to the local file above.
-
-The working directory is {project_root}.
+Working directory: {PROJECT_ROOT}
 """
 
     print(f"Reviewing PR #{pr_number} in {owner}/{repo}...")
-    review_output = ""
-
-    async for message in query(
-        prompt=prompt,
-        options=ClaudeAgentOptions(
-            cwd=project_root,
+    await run_agent(
+        "reviewer",
+        prompt,
+        ClaudeAgentOptions(
+            cwd=str(PROJECT_ROOT),
             allowed_tools=["Read", "Write", "Glob", "Grep"],
             mcp_servers={"github": github_mcp_config},
-            max_turns=25,
+            max_turns=15,
             permission_mode="bypassPermissions",
             system_prompt=(
-                "You are an expert code reviewer. You follow repo-specific guidelines precisely. "
-                "You are thorough but not pedantic — focus on meaningful issues. "
-                "Save your review as a JSON file locally — do not post to GitHub."
+                "You are an expert code reviewer. Follow repo-specific guidelines precisely. "
+                "Be thorough but focused — flag meaningful issues, not noise. "
+                "Save the review as a JSON file locally. Do not post to GitHub."
             ),
         ),
-    ):
-        if isinstance(message, ResultMessage):
-            review_output = message.result or ""
-            print(f"Review complete. Review ID: {review_id}")
+        transcript_path=transcript_path,
+    )
 
-    # Load review.json if saved
-    review_json_path = review_dir / "review.json"
+    review_json_path = outputs_dir / "review.json"
     if review_json_path.exists():
         review_output = review_json_path.read_text()
-    elif not review_output:
+    else:
         review_output = json.dumps({"pr": f"{owner}/{repo}#{pr_number}", "issues": []})
+        print(f"  [warn] reviewer did not write {out_rel}/review.json")
 
+    print(f"Review complete. Review ID: {review_id}")
     return review_id, review_output

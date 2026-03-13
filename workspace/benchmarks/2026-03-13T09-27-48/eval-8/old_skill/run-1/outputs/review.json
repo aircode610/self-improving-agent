@@ -1,0 +1,97 @@
+{
+  "pr": "aircode610/Clarus#8",
+  "summary": "This PR adds three offline data-preparation scripts (src/prepare_data.py, src/get_assertions_and_relations.py, src/get_assertions_and_relations_openai.py) plus sample JSONL output files. The scripts collect NLP paper abstracts from ACL Anthology and annotate them with assertions and RST-style relations. Eight critical bugs were found: unconditional GPU-only imports, missing API-key validation, a case-sensitivity bug in keyword filtering, missing output-directory creation, a wrong system-prompt constant for the relations task, an index-0 falsy-check bug in extract_relations, an ids/output_annotations length mismatch after parse errors, and an IndexError on empty assertion strings.",
+  "issues": [
+    {
+      "file": "src/get_assertions_and_relations.py",
+      "line": 8,
+      "severity": "critical",
+      "comment": "Unconditional top-level imports `from unsloth import FastLanguageModel` and `from transformers import TextStreamer` (lines 8-9) are not guarded by `try/except ImportError`. Any user without GPU/unsloth installed gets an ImportError before any code runs. Apply the `_<DEP>_AVAILABLE` flag pattern from voice/streamlit_voice.py: wrap each in `try/except ImportError` and set `_UNSLOTH_AVAILABLE = False` on failure. Check the flag before calling `FastLanguageModel.from_pretrained`."
+    },
+    {
+      "file": "src/get_assertions_and_relations.py",
+      "line": 15,
+      "severity": "critical",
+      "comment": "The grazie client imports (`from grazie.api.client.endpoints import ...`, lines 15-21) are also unconditional. Users without the Grazie SDK installed cannot import the module even when they only plan to use the OpenAI path. Guard with `try/except ImportError` and a `_GRAZIE_AVAILABLE` flag."
+    },
+    {
+      "file": "src/get_assertions_and_relations_openai.py",
+      "line": 43,
+      "severity": "critical",
+      "comment": "`client = openai.OpenAI()` is constructed with no prior check that `OPENAI_API_KEY` is set in the environment. A missing key produces a cryptic SDK-internal error rather than a helpful message. Add: `api_key = os.environ.get('OPENAI_API_KEY'); if not api_key: raise ValueError('OPENAI_API_KEY environment variable is not set.')` before constructing the client."
+    },
+    {
+      "file": "src/prepare_data.py",
+      "line": 15,
+      "severity": "critical",
+      "comment": "Case-sensitivity bug: `keyword_string in str(paper.title).lower()` lowercases the title but NOT the keyword. Passing `--keyword_string='Semantic Parsing'` returns zero results because the uppercase letters never match the lowercased title. Fix: `keyword_string.lower() in str(paper.title).lower()`."
+    },
+    {
+      "file": "src/prepare_data.py",
+      "line": 24,
+      "severity": "critical",
+      "comment": "`df.to_json(output_path, ...)` writes to the path without ensuring the parent directory exists. On a fresh clone, if `data/` does not exist, Python raises `FileNotFoundError`. Add `os.makedirs(os.path.dirname(output_path), exist_ok=True)` before the write. The same issue exists in `src/get_assertions_and_relations.py` and `src/get_assertions_and_relations_openai.py` before each `output_df.to_json(output_data_path, ...)` call."
+    },
+    {
+      "file": "src/get_assertions_and_relations.py",
+      "line": 110,
+      "severity": "critical",
+      "comment": "Wrong prompt constant for the relations task. When `task == 'relations'`, `prompt_for_grazie_api_models` is set to `ASSERTION_PROMPT_FOR_GRAZIE_API_MODELS` (the assertion segmentation instruction) instead of `RELATION_PROMPT_FOR_GRAZIE_API_MODELS`. `RELATION_PROMPT_FOR_GRAZIE_API_MODELS` is defined at module level but never used anywhere. Fix: `elif task == 'relations': prompt_for_grazie_api_models = RELATION_PROMPT_FOR_GRAZIE_API_MODELS`."
+    },
+    {
+      "file": "src/get_assertions_and_relations.py",
+      "line": 64,
+      "severity": "critical",
+      "comment": "`if arg1 and arg2:` in `extract_relations` is falsy when `arg1 == 0` (the first assertion in the list). Any relation where argument1 is assertion index 0 is silently dropped because Python treats integer 0 as falsy. Additionally, the append happens on the NEXT loop iteration after both are found — if argument2 is the last assertion, no next iteration occurs and the relation is lost. Fix: change the guard to `if arg1 is not None and arg2 is not None:` and move the append outside the loop (or flush remaining after the loop). The identical bug exists in `src/get_assertions_and_relations_openai.py`."
+    },
+    {
+      "file": "src/get_assertions_and_relations.py",
+      "line": 148,
+      "severity": "critical",
+      "comment": "ids/output_annotations length mismatch on JSON parse failure. `ids.append(idx)` is called unconditionally before the `try/except` block, but `output_annotations.append(extracted_relations)` is only called on success. When a JSON parse fails, `ids` grows by one but `output_annotations` does not. The final `zip(output_annotations, ids)` silently truncates, mapping every subsequent record to the wrong ID. Fix: either also skip `ids.append(idx)` on failure (move it inside the try), or append a sentinel (e.g., `[]`) to `output_annotations` in the except block to keep lengths in sync. Identical bug in `src/get_assertions_and_relations_openai.py`."
+    },
+    {
+      "file": "src/get_assertions_and_relations.py",
+      "line": 130,
+      "severity": "critical",
+      "comment": "`if assertion[0].isdigit() or assertion.startswith('-'):` raises `IndexError` when `assertion` is an empty string. `generated_text.split('\\n')` can produce empty strings (e.g., a trailing newline). There is no empty-string guard here (unlike in `extract_relations`). Fix: add `if not assertion: continue` before the index check. The same bug exists in `src/get_assertions_and_relations_openai.py`."
+    },
+    {
+      "file": "src/utils/relation_prompts.py",
+      "line": 1,
+      "severity": "warning",
+      "comment": "`relation2demo` defines five relation types: Evidence, Cause, Contrast, Condition, Background. The Clarus model (`models/assertions.py`) defines six: `Literal['evidence', 'background', 'cause', 'contrast', 'condition', 'contradiction']`. 'contradiction' is missing from the prompt vocabulary. Additionally, the prompt uses Title Case ('Evidence') while the model expects lowercase ('evidence') — any downstream code matching LLM output to model literals will fail unless case-normalisation is added."
+    },
+    {
+      "file": "src/get_assertions_and_relations.py",
+      "line": 1,
+      "severity": "warning",
+      "comment": "API call loop over up to 50 papers with no retry or backoff. A single transient rate-limit or timeout error aborts the entire run with no recoverable state. Add exponential-backoff retry (or at minimum save partial results after each item) as shown in common-issues.md #12. The same issue exists in `src/get_assertions_and_relations_openai.py`."
+    },
+    {
+      "file": "data/generated_assertions.jsonl",
+      "line": 0,
+      "severity": "warning",
+      "comment": "Generated data files (`data/generated_assertions.jsonl`, `data/generated_relations.jsonl`) are committed to version control. Generated files bloat the repo, may contain proprietary content, and create a false impression of authoritative data. Add `data/*.jsonl` and `data/*.json` to `.gitignore` and document reproduction steps in the README."
+    },
+    {
+      "file": "src/get_assertions_and_relations_openai.py",
+      "line": 1,
+      "severity": "warning",
+      "comment": "Significant code duplication between `src/get_assertions_and_relations.py` and `src/get_assertions_and_relations_openai.py`: `extract_relations`, the assertion post-processing loop, the JSON normalisation block, the prompt construction, and the output serialisation are verbatim copies. Any bug fix (e.g., the `arg1 == 0` issue above) must be applied twice. Factor shared logic into `src/utils/` and import from both scripts."
+    },
+    {
+      "file": "src/prepare_data.py",
+      "line": 1,
+      "severity": "nit",
+      "comment": "Missing module docstring. All Python files in this repo open with a triple-quoted module docstring describing the file's purpose and role in the system (see conventions.md §6). Add one to `src/prepare_data.py`, `src/get_assertions_and_relations.py`, `src/get_assertions_and_relations_openai.py`, and `src/utils/relation_prompts.py`."
+    },
+    {
+      "file": "src/get_assertions_and_relations.py",
+      "line": 13,
+      "severity": "nit",
+      "comment": "Commented-out debug code left in: `# os.environ['GRAZIE_JWT_TOKEN'] = ''` (line 13) and commented-out `textdistance.overlap` alternatives inside `extract_relations`. Remove before merging or move to a developer notes section."
+    }
+  ],
+  "verdict": "REQUEST_CHANGES"
+}

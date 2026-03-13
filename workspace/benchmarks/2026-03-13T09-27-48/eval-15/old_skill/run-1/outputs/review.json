@@ -1,0 +1,103 @@
+{
+  "pr": "aircode610/Clarus#15",
+  "summary": "This PR wires real LLM calls into the conflict-resolving layer, replacing two TODO stubs with `get_llm_answer_with_parent` and `get_llm_answer_without_parent`, and externalises all prompts into YAML files. The implementation contains five critical defects: four hardcoded literals that feed wrong data into every LLM comparison, unguarded `json.loads` calls on non-deterministic LLM output, missing env-var validation, a broken `cmp_to_key` comparator that never returns a negative integer, and a module-level file open with a relative path that crashes on import if the YAML is absent.",
+  "issues": [
+    {
+      "file": "conflict_resolving.py",
+      "line": 459,
+      "severity": "critical",
+      "comment": "Hardcoded `parent_id=\"P1\"` in `get_llm_answer_with_parent`. The method receives `rel1` and `rel2` but never derives the actual parent assertion ID from them. Every LLM comparison tells the model the parent is \"P1\" regardless of the real graph context, producing silently wrong priority decisions. The caller (`compare_two_relations`) does not pass a parent_id, so the method signature needs a `parent_id: str` parameter threaded from `sort_all_children`."
+    },
+    {
+      "file": "conflict_resolving.py",
+      "line": 460,
+      "severity": "critical",
+      "comment": "Hardcoded `relation_type=\"cause\"` in `get_llm_answer_with_parent`. The actual shared relationship type of `rel1`/`rel2` is never passed to the prompt. The LLM is always asked to judge a \"cause\" relationship even when the real type is \"evidence\", \"contrast\", etc., making every tie-break comparison semantically incorrect. Fix: pass `relation_type=rel1.relationship_type` (both relations share the same type when this method is called from `compare_two_relations`)."
+    },
+    {
+      "file": "conflict_resolving.py",
+      "line": 463,
+      "severity": "critical",
+      "comment": "Hardcoded `\"confidence\": 0.8` for `r1` in `get_llm_answer_with_parent`. The actual `rel1.confidence` value is ignored. Fix: use `\"confidence\": rel1.confidence`. (Per common-issues #11: numeric hardcoded literals are as suspect as string ones — all four hardcoded values in this function must be caught.)"
+    },
+    {
+      "file": "conflict_resolving.py",
+      "line": 469,
+      "severity": "critical",
+      "comment": "Hardcoded `\"confidence\": 0.75` for `r2` in `get_llm_answer_with_parent`. The actual `rel2.confidence` value is ignored. Fix: use `\"confidence\": rel2.confidence`."
+    },
+    {
+      "file": "conflict_resolving.py",
+      "line": 476,
+      "severity": "critical",
+      "comment": "`json.loads(content)` in `get_llm_answer_with_parent` has no error handling. LLM output is non-deterministic; a single malformed response raises an unhandled `json.JSONDecodeError` that crashes the entire pipeline. Fix: wrap in `try/except (json.JSONDecodeError, ValueError)` and return a safe default (e.g., `True`) with a warning log. (Per common-issues #1.)"
+    },
+    {
+      "file": "conflict_resolving.py",
+      "line": 493,
+      "severity": "critical",
+      "comment": "`json.loads(content)` in `get_llm_answer_without_parent` has no error handling — same issue as line 476. Any unexpected LLM response format (markdown explanation, apology text, etc.) raises an unhandled `json.JSONDecodeError`. Fix: same `try/except` guard as above. (Per common-issues #1.)"
+    },
+    {
+      "file": "conflict_resolving.py",
+      "line": 457,
+      "severity": "critical",
+      "comment": "No `OPENAI_API_KEY` environment variable validation before constructing `ChatOpenAI`. `os.getenv(\"OPENAI_API_KEY\")` silently returns `None` if the variable is unset; the SDK then raises a cryptic internal error. Fix: validate with `api_key = os.environ.get(\"OPENAI_API_KEY\"); if not api_key: raise ValueError(\"OPENAI_API_KEY is not set\")` before constructing the client. Same pattern applies at line 482. (Per common-issues #5.)"
+    },
+    {
+      "file": "conflict_resolving.py",
+      "line": 554,
+      "severity": "critical",
+      "comment": "`comparison()` inside `sort_all_children` is passed to `cmp_to_key` but returns a `bool` (0 or 1), never a negative integer. `cmp_to_key` requires the comparator to return negative when `node1 < node2`, zero when equal, and positive when `node1 > node2`. Because `False` (0) is ambiguous between \"equal\" and \"node2 wins\", the sort cannot correctly order children where node2 should precede node1 — the resulting `ordered_graph` is incorrect. Fix: return `-1` when the first argument should come after the second (i.e., `return -1 if answer else 1` for the boolean LLM path, and adapt `compare_two_relations` similarly)."
+    },
+    {
+      "file": "conflict_resolving.py",
+      "line": 16,
+      "severity": "critical",
+      "comment": "Module-level `open(Path(\"prompts_in_conflict_resolving.yaml\"), ...)` executes at import time with a CWD-relative path and no error handling. If the YAML file is absent (fresh clone missing the file, or process started from a different directory), the entire `conflict_resolving` module fails to import with `FileNotFoundError` before any code runs. Fix: use `Path(__file__).parent / \"prompts_in_conflict_resolving.yaml\"` for a file-relative path, and wrap in `try/except FileNotFoundError` with a clear error message."
+    },
+    {
+      "file": "conflict_resolving.py",
+      "line": 13,
+      "severity": "warning",
+      "comment": "`from structure import Relationship` is non-standard. Per repo conventions (SKILL.md key modules, conventions.md §5), `Relationship` lives in `models/assertions.py` and is re-exported by `models/__init__.py`. The canonical import is `from models import Relationship` (already used on line 12 for `Assertion`). A `structure.py` root-level file is not the authoritative source."
+    },
+    {
+      "file": "conflict_resolving.py",
+      "line": 457,
+      "severity": "warning",
+      "comment": "Both `get_llm_answer_with_parent` (line 457) and `get_llm_answer_without_parent` (line 482) instantiate a new `ChatOpenAI` object on every call. Per the SKILL workflow class contract, the LLM client should be initialised once in `__init__` as `self.llm = ChatOpenAI(model=model_name, temperature=0.3)` and reused. Per-call construction is wasteful (connection overhead) and inconsistent with every other workflow in the codebase."
+    },
+    {
+      "file": "conflict_resolving.py",
+      "line": 451,
+      "severity": "warning",
+      "comment": "No retry/backoff on LLM API calls in `get_llm_answer_with_parent` and `get_llm_answer_without_parent`. A single transient API error (rate-limit, timeout) on any comparison during `order_the_graph` aborts the entire ordering pass with no recoverable state. Fix: wrap `chain.invoke(...)` in a small retry loop with exponential back-off (3 attempts, 2^n second delay). (Per common-issues #12.)"
+    },
+    {
+      "file": "conflict_resolving.py",
+      "line": 527,
+      "severity": "warning",
+      "comment": "`weights[relation_type1]` raises `KeyError` if `relation_type1` is `None` (from the new `getattr(..., None)` fallback) or `\"contradiction\"` (a valid relationship type per SKILL §13 that is absent from the `weights` dict). The `getattr` defensive read introduced in this PR actually makes the `None` path reachable. Fix: add a guard `if relation_type1 not in weights or relation_type2 not in weights: return True` before the dict lookup, and either add `\"contradiction\"` to `weights` or explicitly exclude contradiction edges from ever reaching this method."
+    },
+    {
+      "file": "conflict_resolving.py",
+      "line": 0,
+      "severity": "warning",
+      "comment": "`test_1` fixture (20 Relationship objects covering multiple contradiction/SCC cycles) was deleted with no replacement. This was the only test data exercising multi-cycle conflict resolution. Per common-issues #10, deleting test fixtures without replacement is a warning. The new `assertions_test_2` companion list is a good addition for `test_2`, but the dense-cycle scenario from `test_1` has no coverage path now."
+    },
+    {
+      "file": "conflict_resolving.py",
+      "line": 6,
+      "severity": "nit",
+      "comment": "Duplicate streamlit import: `import streamlit` (line 6) and `import streamlit as st` (line 7) are both present. The bare `import streamlit` is unused — remove it."
+    },
+    {
+      "file": "prompts_in_conflict_resolving.yaml",
+      "line": 0,
+      "severity": "nit",
+      "comment": "Three new YAML files (`prompts_in_conflict_resolving.yaml`, `prompts_in_idea_capture.yaml`, `prompts_in_structure.yaml`) are added at the repo root with no README documentation. Per SKILL checklist §15, new resources placed at the root should be documented. Also, `prompts_in_idea_capture.yaml` and `prompts_in_structure.yaml` are added but not consumed by any code in this PR — their presence without a consumer is unexplained."
+    }
+  ],
+  "verdict": "REQUEST_CHANGES"
+}

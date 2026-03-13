@@ -1,0 +1,127 @@
+{
+  "pr": "aircode610/Clarus#8",
+  "summary": "PR #8 adds three standalone data-pipeline scripts (src/prepare_data.py, src/get_assertions_and_relations.py, src/get_assertions_and_relations_openai.py) plus three committed generated JSONL files under data/. The scripts have numerous blocking defects: unconditional GPU-package imports, missing directory creation before file writes, a missing OpenAI API key check, a wrong system prompt for the relations task, a Python truthiness bug that silently drops all relations involving the first assertion, and a critical ids/output_annotations length mismatch that corrupts every record after the first parse failure. All findings are in standalone scripts outside the main app layers; no existing workflow, model, UI, or voice code is modified.",
+  "issues": [
+    {
+      "file": "src/prepare_data.py",
+      "line": 15,
+      "severity": "critical",
+      "comment": "Case-sensitivity bug: `keyword_string in str(paper.title).lower()` lowercases the paper title but NOT keyword_string. A user passing --keyword_string=\"Semantic Parsing\" (capital S/P, as shown in the PR description example) will get zero results because the comparison is case-sensitive on the left side. Both sides must be normalised: `keyword_string.lower() in str(paper.title).lower()`. (SKILL checklist 17f / common-issues.md §6)"
+    },
+    {
+      "file": "src/prepare_data.py",
+      "line": 25,
+      "severity": "critical",
+      "comment": "Missing os.makedirs before file write: `df.to_json(output_path, ...)` will raise FileNotFoundError on a fresh clone if the data/ directory does not exist. Add `os.makedirs(os.path.dirname(output_path), exist_ok=True)` (or `Path(output_path).parent.mkdir(parents=True, exist_ok=True)`) immediately before the write. (SKILL checklist 17b / common-issues.md §4)"
+    },
+    {
+      "file": "src/get_assertions_and_relations.py",
+      "line": 8,
+      "severity": "critical",
+      "comment": "Unconditional heavy/GPU dependency imports: `from unsloth import FastLanguageModel` (line 8) and `from transformers import TextStreamer` (line 9) are imported at module top-level with no try/except ImportError guard. On any CPU-only machine or environment that only has the OpenAI backend, the script raises ImportError before any code runs — even when invoking with --model_name_or_path=openai-gpt-4o. Apply the _<DEP>_AVAILABLE flag pattern from voice/streamlit_voice.py. (SKILL checklist 17a / common-issues.md §3)"
+    },
+    {
+      "file": "src/get_assertions_and_relations.py",
+      "line": 100,
+      "severity": "critical",
+      "comment": "Wrong system prompt for relations task: both the assertions branch and the relations branch of the `if task ==` block assign `prompt_for_grazie_api_models = ASSERTION_PROMPT_FOR_GRAZIE_API_MODELS` (whose value is 'Your task is to segment the text into assertions...'). The constant RELATION_PROMPT_FOR_GRAZIE_API_MODELS is defined but never used. The Grazie API model will therefore receive an assertion-extraction system prompt when asked to annotate relations, producing garbage output. Fix: assign RELATION_PROMPT_FOR_GRAZIE_API_MODELS in the relations branch."
+    },
+    {
+      "file": "src/get_assertions_and_relations.py",
+      "line": 85,
+      "severity": "critical",
+      "comment": "ids/output_annotations length mismatch on parse failure: `ids.append(idx)` is executed unconditionally before the try/except JSON-parsing block, but `output_annotations.append(extracted_relations)` is only executed inside the try block. When a record fails to parse, ids grows by 1 but output_annotations does not. The subsequent `for relation, idx in zip(output_annotations, ids)` then silently misaligns every record after the first failure — record N's relations are written under record N+1's id. Fix: either append a sentinel (e.g., an empty list) in the except branch, or append idx inside the try block only. (SKILL checklist 6 / common-issues.md §2)"
+    },
+    {
+      "file": "src/get_assertions_and_relations.py",
+      "line": 60,
+      "severity": "critical",
+      "comment": "Python truthiness bug in extract_relations — index 0 treated as falsy: the condition `if arg1 and arg2` is False whenever arg1 == 0 (i.e., the first assertion in the list is one of the relation arguments), because `bool(0)` is False. This silently drops every relation where argument1 or argument2 maps to the first assertion. The correct check is `if arg1 is not None and arg2 is not None`. This bug exists identically in both get_assertions_and_relations.py and get_assertions_and_relations_openai.py. (SKILL checklist 17g)"
+    },
+    {
+      "file": "src/get_assertions_and_relations.py",
+      "line": 120,
+      "severity": "critical",
+      "comment": "Missing os.makedirs before output file write: `output_df.to_json(output_data_path, ...)` is called for both tasks without ensuring the parent directory exists. Same fix as prepare_data.py: `os.makedirs(os.path.dirname(output_data_path), exist_ok=True)` before the write. (SKILL checklist 17b / common-issues.md §4)"
+    },
+    {
+      "file": "src/get_assertions_and_relations_openai.py",
+      "line": 40,
+      "severity": "critical",
+      "comment": "Missing OPENAI_API_KEY validation before API client construction: `client = openai.OpenAI()` is called with no prior check that the env var is set. A missing key produces a cryptic SDK-internal exception. Required fix: `api_key = os.environ.get('OPENAI_API_KEY'); if not api_key: raise ValueError('OPENAI_API_KEY is not set'); client = openai.OpenAI(api_key=api_key)`. (SKILL checklist 17e / common-issues.md §5)"
+    },
+    {
+      "file": "src/get_assertions_and_relations_openai.py",
+      "line": 55,
+      "severity": "critical",
+      "comment": "Python truthiness bug in extract_relations — index 0 treated as falsy: identical to the same bug in get_assertions_and_relations.py. `if arg1 and arg2` silently drops all relations where argument1 or argument2 is the first assertion (index 0). Fix: `if arg1 is not None and arg2 is not None`. (SKILL checklist 17g)"
+    },
+    {
+      "file": "src/get_assertions_and_relations_openai.py",
+      "line": 85,
+      "severity": "critical",
+      "comment": "ids/output_annotations length mismatch on parse failure: same structural bug as in get_assertions_and_relations.py — ids.append(idx) is outside the try/except block for JSON parsing, so a parse failure causes silent record-to-id misalignment in the final zip. (SKILL checklist 6 / common-issues.md §2)"
+    },
+    {
+      "file": "src/get_assertions_and_relations_openai.py",
+      "line": 100,
+      "severity": "critical",
+      "comment": "Missing os.makedirs before output file write: `output_df.to_json(output_data_path, ...)` called without ensuring the parent directory exists. (SKILL checklist 17b / common-issues.md §4)"
+    },
+    {
+      "file": "src/get_assertions_and_relations.py",
+      "line": 115,
+      "severity": "warning",
+      "comment": "Assertion strip loop: `if assertion[0].isdigit() or assertion.startswith('-')` raises IndexError if assertion is an empty string. The LLM can easily produce a blank line in its output, which will crash the processing loop. Add a guard: `if not assertion: continue` (or `if assertion and (assertion[0].isdigit() or assertion.startswith('-')):`). Same issue exists in get_assertions_and_relations_openai.py."
+    },
+    {
+      "file": "src/get_assertions_and_relations.py",
+      "line": 0,
+      "severity": "warning",
+      "comment": "Relation type vocabulary mismatch with model: the relations prompt enumerates 'Evidence, Cause, Contrast, Condition, Background' (5 types, capitalized) but models/assertions.py defines Relationship.relationship_type as Literal['evidence', 'background', 'cause', 'contrast', 'condition', 'contradiction']. The prompt is missing 'contradiction' and uses capital-case strings that won't match the model's lowercase literals. If generated relations are ever loaded into the main Clarus app, all relation_type values will fail Pydantic validation. (SKILL checklist 13)"
+    },
+    {
+      "file": "src/get_assertions_and_relations.py",
+      "line": 0,
+      "severity": "warning",
+      "comment": "No retry or per-record checkpointing in the main processing loop: the loop iterates over up to 50 papers calling an external LLM API for each record with no retry logic and no partial-result save. A single transient error (rate limit, timeout) on item 47 of 50 aborts the entire run with no recoverable state. Add exponential back-off retry per record and/or flush completed records to disk after each iteration. Same issue in get_assertions_and_relations_openai.py. (SKILL checklist 17c / common-issues.md §12)"
+    },
+    {
+      "file": "src/get_assertions_and_relations_openai.py",
+      "line": 0,
+      "severity": "warning",
+      "comment": "extract_relations is duplicated verbatim from get_assertions_and_relations.py. Any bug fix in one copy must be manually replicated in the other. Factor the shared function into src/utils/ and import from both scripts. (SKILL checklist 17h / common-issues.md §8)"
+    },
+    {
+      "file": "data/generated_assertions.jsonl",
+      "line": 0,
+      "severity": "warning",
+      "comment": "Generated/derived data files committed to git: data/generated_assertions.jsonl, data/generated_relations.jsonl, and data/selected_paper_abstracts.jsonl are outputs of the scripts added in this PR. These files bloat the repository, may contain content with copyright constraints (ACL Anthology abstracts), and give a false impression of authority. Add data/*.jsonl to .gitignore and document reproduction steps in README. (SKILL checklist 17i / common-issues.md §9)"
+    },
+    {
+      "file": "src/get_assertions_and_relations.py",
+      "line": 0,
+      "severity": "warning",
+      "comment": "No test coverage for any new logic: this PR introduces index-mapping (extract_relations), LLM post-processing (assertion strip loop), and JSON parsing — all non-trivial logic with edge cases — but adds zero tests. At minimum, unit tests for extract_relations (covering index-0 edge case, empty assertions, missing matches) and the assertion post-processing loop should be added. (SKILL checklist 16 / common-issues.md §10)"
+    },
+    {
+      "file": "src/prepare_data.py",
+      "line": 1,
+      "severity": "nit",
+      "comment": "Missing module docstring: the file has no triple-quoted module-level docstring. Every Python file in the repo opens with a docstring describing its purpose (see app.py, workflows/prose.py, ui/common.py). Add one above the imports. (conventions.md §6)"
+    },
+    {
+      "file": "src/get_assertions_and_relations.py",
+      "line": 1,
+      "severity": "nit",
+      "comment": "Missing module docstring: same convention as prepare_data.py — add a triple-quoted docstring at the top of the file. (conventions.md §6)"
+    },
+    {
+      "file": "src/get_assertions_and_relations_openai.py",
+      "line": 1,
+      "severity": "nit",
+      "comment": "Missing module docstring: add a triple-quoted docstring at the top of the file. (conventions.md §6)"
+    }
+  ],
+  "verdict": "REQUEST_CHANGES"
+}

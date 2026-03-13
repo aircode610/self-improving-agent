@@ -1,91 +1,84 @@
 """Bootstrap agent: scans a GitHub repo via MCP and writes initial PR review skills."""
 
-import os
 from pathlib import Path
 
-import anyio
-from claude_agent_sdk import query, ClaudeAgentOptions, ResultMessage
+from claude_agent_sdk import ClaudeAgentOptions, ResultMessage, query
 
+from src.utils import run_agent
 
-SKILLS_DIR = Path(__file__).parent.parent / "skills" / "pr-review"
+PROJECT_ROOT = Path(__file__).parent.parent
 
 
 async def run_bootstrapper(owner: str, repo: str, github_mcp_config: dict) -> None:
-    """Scan owner/repo via GitHub MCP and write initial review skills to skills/pr-review/."""
+    """Scan owner/repo via GitHub MCP and write initial review skills."""
 
-    SKILLS_DIR.mkdir(parents=True, exist_ok=True)
-    project_root = str(Path(__file__).parent.parent)
+    skill_dir = PROJECT_ROOT / "skills" / owner / repo
+    skill_dir.mkdir(parents=True, exist_ok=True)
+    (skill_dir / "references").mkdir(exist_ok=True)
 
-    prompt = f"""Analyze the repository {owner}/{repo} to create PR review skills.
+    skill_rel = skill_dir.relative_to(PROJECT_ROOT)
 
-Use the GitHub MCP tools to thoroughly understand the codebase:
+    prompt = f"""Analyze the GitHub repository {owner}/{repo} and create PR review skills.
 
-1. Use get_repository to read repo metadata (language, description, topics, default branch)
-2. Use get_file_contents on the root directory to see the project structure
-3. Use get_file_contents to read: README.md, package.json/pyproject.toml/go.mod/pom.xml/Cargo.toml (whichever exists), any CONTRIBUTING.md, PR templates (.github/PULL_REQUEST_TEMPLATE.md), .github/workflows/, key config files (eslint, prettier, mypy, etc.)
-4. Use get_file_contents to read 3-5 representative source files to understand code patterns
-5. Use search_code to find patterns: error handling conventions, auth/validation patterns, test file naming, logging patterns
-6. Use list_commits to see recent commit messages and understand change patterns
+Use the GitHub MCP tools to understand the codebase:
+1. get_repository — repo metadata (language, description, topics, default branch)
+2. get_file_contents on "/" — project structure overview
+3. get_file_contents to read: README.md, package.json/pyproject.toml/go.mod/Cargo.toml (whichever exists), CONTRIBUTING.md, .github/PULL_REQUEST_TEMPLATE.md, .github/workflows/ (first 2-3 files)
+4. get_file_contents on 3-5 representative source files — understand code patterns
+5. search_code for error handling, auth patterns, test naming, logging conventions
 
-Then create these files locally using the Write tool:
+Now write THREE files using the Write tool:
 
-**File 1: skills/pr-review/SKILL.md**
-Write YAML frontmatter with name and description, then detailed PR review instructions specific to THIS repo.
-Include:
-- Architecture overview (what the repo actually is)
-- Tech stack specifics (exact framework versions, conventions you found)
-- What to check: broken into categories (correctness, style, security, tests, etc.)
-- Repo-specific patterns to look for (e.g., if it's FastAPI: check dependency injection; if React: check hooks rules)
-- Common mistake patterns you noticed from the code
-- Reference to repo-conventions.md and common-issues.md
+━━━ FILE 1: {skill_rel}/SKILL.md ━━━
+This is the orchestrator (keep under 400 lines). Include:
+- YAML frontmatter: name, description (when to trigger + what it does)
+- Architecture overview: what the repo actually is, tech stack, key modules
+- PR review checklist (≤15 focused items, specific to THIS repo)
+- How to use reference files:
+  "For naming/import/error conventions → read {skill_rel}/references/conventions.md"
+  "For known pitfalls from past reviews → read {skill_rel}/references/common-issues.md"
+- Review output format instructions (JSON schema)
 
-**File 2: skills/pr-review/repo-conventions.md**
-Specific coding conventions you found in the repo:
-- Naming patterns (files, functions, variables, classes)
-- Import ordering/grouping conventions
-- Error handling patterns (how errors are thrown/handled/logged)
-- Test patterns (test file locations, test naming, fixture patterns)
-- Any project-specific rules from config files
+━━━ FILE 2: {skill_rel}/references/conventions.md ━━━
+Detailed conventions found in the code:
+- Naming patterns (files, functions, variables, classes) with real examples
+- Import ordering and grouping rules
+- Error handling pattern (how exceptions are thrown, caught, logged)
+- Test file locations and naming conventions
+- Any project-specific rules from config files (eslint, mypy, etc.)
+- Reference actual file paths and class names you found
 
-**File 3: skills/pr-review/common-issues.md**
-Start with a placeholder — this file grows from grader feedback:
+━━━ FILE 3: {skill_rel}/references/common-issues.md ━━━
+Start with:
 ```
 # Common Issues
 
-This file grows over time as the grader identifies patterns the reviewer misses.
+This file grows from grader feedback — patterns the reviewer consistently misses.
 
 ## Known Pitfalls
 
 (None yet — will be populated after the first reviews are graded)
 ```
 
-Be specific to THIS repo. Reference actual file paths, class names, and patterns you found.
-Do not write generic advice that applies to any codebase.
-The working directory is {project_root} — write files relative to it.
+Be concrete and specific to THIS repo. No generic advice.
+Working directory: {PROJECT_ROOT}
 """
 
     print(f"Bootstrapping skills for {owner}/{repo}...")
-    async for message in query(
-        prompt=prompt,
-        options=ClaudeAgentOptions(
-            cwd=project_root,
+    await run_agent(
+        "bootstrap",
+        prompt,
+        ClaudeAgentOptions(
+            cwd=str(PROJECT_ROOT),
             allowed_tools=["Read", "Write", "Glob", "Grep"],
             mcp_servers={"github": github_mcp_config},
-            max_turns=30,
+            max_turns=20,
             permission_mode="bypassPermissions",
             system_prompt=(
-                "You are a codebase analyst. Your job is to deeply understand a GitHub repository "
-                "and write precise, repo-specific PR review skills. Be concrete and specific — "
-                "reference actual file paths, class names, and patterns from the code. "
-                "Avoid generic advice."
+                "You are a codebase analyst. Deeply understand a GitHub repository "
+                "and write precise, repo-specific PR review skills. Be concrete — "
+                "reference actual file paths, class names, and patterns. No generic advice."
             ),
         ),
-    ):
-        if isinstance(message, ResultMessage):
-            print("Bootstrap complete!")
-            print(message.result[:500] if message.result else "")
-        else:
-            # Print progress
-            msg_type = getattr(message, "type", "unknown")
-            if msg_type == "assistant":
-                pass  # quiet
+    )
+    print(f"Bootstrap complete! Skills written to {skill_rel}/")

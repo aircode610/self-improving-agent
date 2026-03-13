@@ -35,15 +35,19 @@ def get_github_mcp_config() -> dict:
     }
 
 
-def cmd_init(args):
-    """Bootstrap: scan repo via GitHub MCP, write initial skills."""
-    from src.bootstrapper import run_bootstrapper
-
-    owner_repo = args.repo
+def _parse_owner_repo(owner_repo: str) -> tuple[str, str]:
     if "/" not in owner_repo:
         print(f"Error: repo must be in 'owner/repo' format, got: {owner_repo}")
         sys.exit(1)
     owner, repo = owner_repo.split("/", 1)
+    return owner, repo
+
+
+def cmd_init(args):
+    """Bootstrap: scan repo via GitHub MCP, write initial skills."""
+    from src.bootstrapper import run_bootstrapper
+
+    owner, repo = _parse_owner_repo(args.repo)
     asyncio.run(run_bootstrapper(owner, repo, get_github_mcp_config()))
 
 
@@ -52,23 +56,16 @@ def cmd_review(args):
     from src.reviewer import run_reviewer
     from src.grader import run_grader
 
-    owner_repo = args.repo
-    if "/" not in owner_repo:
-        print(f"Error: repo must be in 'owner/repo' format, got: {owner_repo}")
-        sys.exit(1)
-    owner, repo = owner_repo.split("/", 1)
+    owner, repo = _parse_owner_repo(args.repo)
     pr_number = args.pr_number
-
     mcp_config = get_github_mcp_config()
 
-    # Run reviewer
-    review_id, review_output = asyncio.run(
+    review_id, _ = asyncio.run(
         run_reviewer(owner, repo, pr_number, mcp_config)
     )
 
-    # Auto-run grader
     print(f"\nAuto-grading review {review_id}...")
-    asyncio.run(run_grader(owner, repo, pr_number, review_id, review_output, mcp_config))
+    asyncio.run(run_grader(owner, repo, pr_number, review_id, mcp_config))
     print(f"Grading complete. See history/reviews/{review_id}/grading.json")
 
 
@@ -76,7 +73,8 @@ def cmd_improve(args):
     """Run skill improvement loop based on grader feedback."""
     from src.improver import run_improver
 
-    asyncio.run(run_improver())
+    owner, repo = _parse_owner_repo(args.repo)
+    asyncio.run(run_improver(owner, repo))
 
 
 def cmd_benchmark(args):
@@ -91,6 +89,8 @@ def cmd_benchmark(args):
             sys.exit(1)
         owner_repo = args.repo
         pr_numbers = args.prs
+    elif args.repo:
+        owner_repo = args.repo
 
     asyncio.run(run_benchmarker(pr_numbers, owner_repo, get_github_mcp_config()))
 
@@ -111,7 +111,8 @@ def main():
     review_parser.add_argument("pr_number", type=int, help="PR number to review")
 
     # improve command
-    subparsers.add_parser("improve", help="Improve skills based on grader feedback")
+    improve_parser = subparsers.add_parser("improve", help="Improve skills based on grader feedback")
+    improve_parser.add_argument("repo", help="GitHub repo in owner/repo format")
 
     # benchmark command
     bench_parser = subparsers.add_parser(
@@ -123,7 +124,7 @@ def main():
     )
     bench_parser.add_argument(
         "--repo", metavar="OWNER/REPO",
-        help="Repo for --prs (required when specifying --prs)"
+        help="Repo to benchmark (required when specifying --prs; otherwise inferred from history)"
     )
 
     args = parser.parse_args()
