@@ -1,0 +1,63 @@
+{
+  "metadata": {
+    "skill_name": "pr-review",
+    "skill_path": "/Users/amirali.iranmanesh/JB/self-improving-agent/skills/pr-review",
+    "executor_model": "<model-name>",
+    "analyzer_model": "<model-name>",
+    "timestamp": "2026-03-12T12:49:16Z",
+    "evals_run": [],
+    "runs_per_configuration": 3
+  },
+  "runs": [],
+  "run_summary": {
+    "new_skill": {
+      "pass_rate": {
+        "mean": 0.0,
+        "stddev": 0.0,
+        "min": 0.0,
+        "max": 0.0
+      },
+      "time_seconds": {
+        "mean": 0.0,
+        "stddev": 0.0,
+        "min": 0.0,
+        "max": 0.0
+      },
+      "tokens": {
+        "mean": 0,
+        "stddev": 0,
+        "min": 0,
+        "max": 0
+      }
+    },
+    "old_skill": {
+      "pass_rate": {
+        "mean": 0.0,
+        "stddev": 0.0,
+        "min": 0.0,
+        "max": 0.0
+      },
+      "time_seconds": {
+        "mean": 0.0,
+        "stddev": 0.0,
+        "min": 0.0,
+        "max": 0.0
+      },
+      "tokens": {
+        "mean": 0,
+        "stddev": 0,
+        "min": 0,
+        "max": 0
+      }
+    },
+    "delta": {
+      "pass_rate": "+0.00",
+      "time_seconds": "+0.0",
+      "tokens": "+0"
+    }
+  },
+  "notes": [
+    "Blind comparison: new_skill 0W / old_skill 2W / 0 ties",
+    "A = new_skill, B = old_skill in all comparison files"
+  ]
+}

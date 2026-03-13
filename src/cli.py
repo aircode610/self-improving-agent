@@ -79,6 +79,22 @@ def cmd_improve(args):
     asyncio.run(run_improver())
 
 
+def cmd_benchmark(args):
+    """Compare new skill vs old skill snapshot on past PRs."""
+    from src.benchmarker import run_benchmarker
+
+    pr_numbers = None
+    owner_repo = None
+    if args.prs:
+        if not args.repo:
+            print("Error: --repo required when specifying --prs")
+            sys.exit(1)
+        owner_repo = args.repo
+        pr_numbers = args.prs
+
+    asyncio.run(run_benchmarker(pr_numbers, owner_repo, get_github_mcp_config()))
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="Self-improving PR reviewer powered by Claude Agent SDK"
@@ -97,6 +113,19 @@ def main():
     # improve command
     subparsers.add_parser("improve", help="Improve skills based on grader feedback")
 
+    # benchmark command
+    bench_parser = subparsers.add_parser(
+        "benchmark", help="Compare new vs old skill on past PRs"
+    )
+    bench_parser.add_argument(
+        "--prs", type=int, nargs="+", metavar="PR",
+        help="PR numbers to benchmark on (default: last 3 from history)"
+    )
+    bench_parser.add_argument(
+        "--repo", metavar="OWNER/REPO",
+        help="Repo for --prs (required when specifying --prs)"
+    )
+
     args = parser.parse_args()
 
     if args.command == "init":
@@ -105,6 +134,8 @@ def main():
         cmd_review(args)
     elif args.command == "improve":
         cmd_improve(args)
+    elif args.command == "benchmark":
+        cmd_benchmark(args)
 
 
 if __name__ == "__main__":

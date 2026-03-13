@@ -1,0 +1,74 @@
+{
+  "winner": "B",
+  "reasoning": "Output B is the stronger review on the two dimensions that matter most for a PR review. First, the eval task explicitly requires 'file and line references', and Output B consistently provides specific line numbers for 14 of its 18 issues (e.g., line 1400, 1810, 1457, 1512, 1948, 1373, 135, 1860, 1328, 1276, 1243, 27, 1395, 1474), making each comment directly actionable. Output A provides zero line numbers across all 17 issues, which significantly reduces usability. Second, Output B identifies several real issues that Output A misses: (a) the critical regression where `_make_axes_helper` injects a `'location'` key into kwargs that gets forwarded to `Colorbar()`, which could break every existing colorbar created via `make_axes` (line 1810); (b) the missing `assert` statements in `test_bivar_cbar_ticklocations` that render those test assertions silent no-ops (line 1395); and (c) the performance/correctness issue of `_draw_all` repeatedly destroying and re-creating the `_image` QuadMesh artist (line 1474); and (d) `_make_axes_gridspec_helper` omitting `set_aspect('auto')` compared to the original (line 1948). Output A does raise plausible issues around breaking API changes in `Colorizer.get_clim()` and `Colorizer.clip` that Output B omits, and those could be genuine findings — but without line references they are harder to verify and act on. Both outputs share the same correct verdict (REQUEST_CHANGES) and both cover the mutable default, commented-out code, missing versionadded, missing what's-new RST, docstring typo, and test coverage gap. Output B's issue descriptions are also more detailed and include suggested fixes with code snippets in several places.",
+  "rubric": {
+    "A": {
+      "content": {
+        "correctness": 3,
+        "completeness": 4,
+        "accuracy": 3
+      },
+      "structure": {
+        "organization": 4,
+        "formatting": 2,
+        "usability": 2
+      },
+      "content_score": 3.33,
+      "structure_score": 2.67,
+      "overall_score": 6.0
+    },
+    "B": {
+      "content": {
+        "correctness": 4,
+        "completeness": 5,
+        "accuracy": 4
+      },
+      "structure": {
+        "organization": 4,
+        "formatting": 5,
+        "usability": 5
+      },
+      "content_score": 4.33,
+      "structure_score": 4.67,
+      "overall_score": 9.0
+    }
+  },
+  "output_quality": {
+    "A": {
+      "score": 6,
+      "strengths": [
+        "Identifies breaking API changes in Colorizer.get_clim() and Colorizer.clip that Output B misses — both are plausible and important regressions",
+        "Catches stub/implementation inconsistency for vmin/vmax return types",
+        "Flags wrong exception type (AttributeError vs TypeError/NotImplementedError)",
+        "Notes the isinstance change from colors.Normalize to colors.Norm as a semantic shift",
+        "Correct verdict (REQUEST_CHANGES)"
+      ],
+      "weaknesses": [
+        "Zero line numbers across all 17 issues — the eval task explicitly requires 'file and line references'; reviewers cannot locate issues without them",
+        "Without line references, correctness of issue claims cannot be easily verified",
+        "Misses the critical _make_axes_helper 'location' key regression that could break existing colorbars",
+        "Misses the missing assert statements in test_bivar_cbar_ticklocations (silent test failure)",
+        "Misses the _draw_all artist re-creation performance/correctness issue",
+        "Misses _make_axes_gridspec_helper omitting set_aspect('auto')"
+      ]
+    },
+    "B": {
+      "score": 9,
+      "strengths": [
+        "Provides specific line numbers for 14 of 18 issues, making every comment directly actionable",
+        "Identifies a critical regression: _make_axes_helper injects 'location' into kwargs forwarded to Colorbar() (line 1810)",
+        "Catches the missing assert statements in test_bivar_cbar_ticklocations (line 1395) — a real test bug",
+        "Notes _draw_all destroying and re-creating QuadMesh on every norm change (line 1474) — performance/correctness issue",
+        "Catches _make_axes_gridspec_helper omitting set_aspect('auto') vs original make_axes_gridspec (line 1948)",
+        "Issue comments are detailed, include context and in several cases suggested code fixes",
+        "Correct verdict (REQUEST_CHANGES)",
+        "Summary paragraph accurately characterizes the PR and its draft status"
+      ],
+      "weaknesses": [
+        "Does not identify the potential breaking API changes in Colorizer.get_clim() and Colorizer.clip that Output A flags",
+        "Does not flag stub/implementation inconsistency for vmin/vmax return types",
+        "Does not flag the wrong exception type in ColorizingArtist.get_clim/set_clim"
+      ]
+    }
+  }
+}
